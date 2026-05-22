@@ -4,7 +4,11 @@ import "./globals.css";
 import { AppToastProvider } from "@/components/providers/toast-provider";
 import { APP_NAME, COMPANY_NAME } from "@/lib/constants";
 
-const font = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-sans" });
+const font = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-sans",
+});
 
 export const metadata: Metadata = {
   title: `${APP_NAME} - ${COMPANY_NAME}`,

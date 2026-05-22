@@ -1,4 +1,5 @@
 import "@/lib/load-env";
+import { isPythonScraperEngine } from "@/lib/scraper-engine";
 import fs from "fs/promises";
 import { connectDB } from "@/lib/db";
 import { logActivity } from "@/lib/activityLog";
@@ -69,6 +70,11 @@ async function setVerificationRequired(jobId: string, message: string, extra?: R
 }
 
 export async function processScrapeJob(jobId: string): Promise<void> {
+  if (isPythonScraperEngine()) {
+    console.log(`[worker] Skip ${jobId} — Python scraper handles jobs (SCRAPER_ENGINE=python)`);
+    return;
+  }
+
   await connectDB();
   const job = await ScrapeJob.findById(jobId);
   if (!job) throw new Error(`Job ${jobId} not found`);

@@ -46,23 +46,33 @@ npm run seed:admin
 npm run setup:browser:py
 ```
 
-**Every day — start the app**
+**Every day — start the app (no coding required)**
+
+Double-click:
+
+**`Start Fiverr Lead CRM.bat`**
+
+(in the project folder — copy a shortcut to the client’s Desktop)
+
+Or run:
 
 ```powershell
 npm run client:start
 ```
 
-Then open: **http://localhost:3000** (or the port shown in the terminal).
+Then open: **http://localhost:3000/setup** (or the port shown in the terminal).
 
 Sign in with the credentials you sent privately.
 
-**Optional desktop window (Electron)**
+**Optional desktop window (Electron — feels like an “app”)**
 
 ```powershell
-npm run electron:dev
+npm run electron:app
 ```
 
-Opens a window titled “Fiverr Lead Extractor CRM” instead of using Chrome manually.
+Starts the CRM + scraper and opens a desktop window (not a separate `.exe` installer unless you package with electron-builder later).
+
+**There is no public website link** unless you deploy to a VPS yourself. The client uses **localhost** on their PC.
 
 ---
 

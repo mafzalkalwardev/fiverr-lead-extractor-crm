@@ -9,6 +9,8 @@ load_dotenv(ROOT_DIR / ".env")
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm")
 POLL_INTERVAL_SEC = float(os.getenv("PYTHON_SCRAPER_POLL_SEC", "1.5"))
 BLOCK_HEAVY_RESOURCES = os.getenv("BLOCK_HEAVY_RESOURCES", "true").lower() == "true"
+REVIEW_LOAD_MORE_MAX = int(os.getenv("REVIEW_LOAD_MORE_MAX", "60"))
+GIG_PAGE_WAIT_SEC = float(os.getenv("GIG_PAGE_WAIT_SEC", "1"))
 DISCOVERY_SCROLL_LOOPS = int(os.getenv("DISCOVERY_SCROLL_LOOPS", "4"))
 DISCOVERY_PAGE_WAIT_SEC = float(os.getenv("DISCOVERY_PAGE_WAIT_SEC", "1.5"))
 VERIFICATION_POLL_SEC = float(os.getenv("PYTHON_VERIFICATION_POLL_SEC", "2"))

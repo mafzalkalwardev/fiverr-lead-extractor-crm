@@ -29,10 +29,10 @@ export default function NewJobPage() {
   const [htmlFiles, setHtmlFiles] = useState<FileList | null>(null);
   const [countries, setCountries] = useState<string[]>([...DEFAULT_TARGET_COUNTRIES]);
   const [form, setForm] = useState({
-    maxGigs: 5,
-    maxReviewsPerGig: 10,
-    maxTotalLeads: 50,
-    delaySeconds: 2,
+    maxGigs: 10,
+    maxReviewsPerGig: 0,
+    maxTotalLeads: 500,
+    delaySeconds: 1,
   });
 
   const toggleCountry = (c: string) => {
@@ -238,13 +238,16 @@ export default function NewJobPage() {
                   <Label>Max Reviews / Gig</Label>
                   <Input
                     type="number"
-                    min={1}
-                    max={50}
+                    min={0}
+                    max={500}
                     value={form.maxReviewsPerGig}
                     onChange={(e) =>
                       setForm({ ...form, maxReviewsPerGig: Number(e.target.value) })
                     }
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Use 0 to extract every US/Canada review with an image on each gig before moving on.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Max Total Leads</Label>
@@ -262,7 +265,8 @@ export default function NewJobPage() {
                   <Label>Delay (seconds)</Label>
                   <Input
                     type="number"
-                    min={2}
+                    min={1}
+                    max={30}
                     value={form.delaySeconds}
                     onChange={(e) =>
                       setForm({ ...form, delaySeconds: Number(e.target.value) })

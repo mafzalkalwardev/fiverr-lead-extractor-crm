@@ -60,9 +60,9 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     },
     targetCountries: { type: [String], default: ["United States", "Canada"] },
     maxGigs: { type: Number, default: 10 },
-    maxReviewsPerGig: { type: Number, default: 20 },
+    maxReviewsPerGig: { type: Number, default: 0 },
     maxTotalLeads: { type: Number, default: 100 },
-    delaySeconds: { type: Number, default: 2 },
+    delaySeconds: { type: Number, default: 1 },
     status: {
       type: String,
       enum: [

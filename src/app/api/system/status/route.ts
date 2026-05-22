@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { connectDB, isDbConnectionError } from "@/lib/db";
 import { createRedisConnection, isRedisConnectionError } from "@/queue/connection";
+import { getScraperEngine } from "@/lib/scraper-engine";
 import { getScraperMode } from "@/lib/scraper-mode";
 
 const PYTHON_HEARTBEAT_ID = "python_scraper";
@@ -64,12 +65,18 @@ export async function GET() {
       : "Node worker is running (legacy)"
     : "Scraper not running — start: npm run scraper:py";
 
+  const configuredEngine = getScraperEngine();
+
   return NextResponse.json({
     mongo: mongoOk,
     redis: redisOk,
     worker: workerAlive,
     scraperEngine,
+    configuredEngine,
     scraperMode: getScraperMode(),
-    message,
+    message:
+      configuredEngine === "python" && scraperEngine === "node"
+        ? "Warning: Node worker is running but SCRAPER_ENGINE=python. Stop npm run worker."
+        : message,
   });
 }

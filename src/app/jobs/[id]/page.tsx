@@ -93,10 +93,25 @@ export default function JobMonitorPage() {
   if (!job) {
     return (
       <DashboardLayout>
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          Loading job…
+        </div>
       </DashboardLayout>
     );
   }
+
+  const statusHint: Record<string, string> = {
+    pending: "Queued — Python scraper will pick this up",
+    running: "Python scraper active",
+    discovering_gigs: "Searching Fiverr for gig URLs",
+    extracting_reviews: "Finishing all reviews on current gig, then next gig",
+    verification_required: "Press & Hold — auto assist running in browser",
+    blocked: "Blocked by Fiverr",
+    failed: "Failed — see errors below",
+    completed: "Completed successfully",
+    stopped: "Stopped by user",
+  };
 
   const errors = job.errors || job.jobErrors || [];
   const isVerification = job.status === "verification_required";
@@ -109,26 +124,17 @@ export default function JobMonitorPage() {
 
   return (
     <DashboardLayout>
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Live Job Monitor</h1>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="page-title">Job Monitor</h1>
           <p className="text-muted-foreground">
             {job.niche} · {EXTRACTION_MODE_LABELS[job.extractionMode] || job.extractionMode}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {job.status === "pending" && "Waiting in queue for worker"}
-            {job.status === "running" && "Scraper active"}
-            {job.status === "discovering_gigs" && "Finding Fiverr gig URLs"}
-            {job.status === "extracting_reviews" && "Opening gigs and extracting reviews"}
-            {job.status === "verification_required" &&
-              "Complete Fiverr verification in the opened browser. The app will continue automatically."}
-            {job.status === "blocked" && "Blocked by Fiverr"}
-            {job.status === "failed" && "Failed — see errors"}
-            {job.status === "completed" && "Completed"}
-            {job.status === "stopped" && "Stopped"}
+          <p className="text-sm text-muted-foreground/90">
+            {statusHint[job.status] || job.status}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           <JobStatusBadge status={job.status} />
           <Button variant="outline" size="sm" onClick={exportLeads} className="gap-1">
             <Download className="h-4 w-4" /> Export
@@ -170,34 +176,35 @@ export default function JobMonitorPage() {
         </div>
       )}
 
-      {(job.discoverySource || (job.activityLog && job.activityLog.length > 0)) && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Activity Log</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm space-y-2">
-            {job.discoverySource && (
-              <p>
-                <span className="text-muted-foreground">Search source: </span>
-                <span className="font-medium text-primary">{job.discoverySource}</span>
-                {job.urlsDiscovered != null && (
-                  <span className="text-muted-foreground"> · {job.urlsDiscovered} URLs discovered</span>
-                )}
-              </p>
+      <Card className="mb-6 border-border/80 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold">Activity log</CardTitle>
+          {job.discoverySource && (
+            <p className="text-sm text-muted-foreground">
+              Discovery: <span className="text-primary font-medium">{job.discoverySource}</span>
+              {job.urlsDiscovered != null && ` · ${job.urlsDiscovered} gigs`}
+            </p>
+          )}
+        </CardHeader>
+        <CardContent>
+          <ul className="max-h-56 overflow-y-auto rounded-md border border-border/60 bg-muted/10 p-3 text-xs font-mono space-y-1.5">
+            {(job.activityLog || []).length === 0 ? (
+              <li className="text-muted-foreground">No activity yet</li>
+            ) : (
+              (job.activityLog || []).slice(-40).map((line, i) => (
+                <li key={i} className="text-muted-foreground leading-relaxed">
+                  {line}
+                </li>
+              ))
             )}
-            <ul className="max-h-40 overflow-y-auto text-xs text-muted-foreground font-mono space-y-1">
-              {(job.activityLog || []).slice(-20).map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+          </ul>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Progress</CardTitle>
+        <Card className="border-border/80 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Progress</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <Progress value={job.progressPercent} />
@@ -246,9 +253,9 @@ export default function JobMonitorPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Errors</CardTitle>
+        <Card className="border-border/80 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Errors</CardTitle>
           </CardHeader>
           <CardContent>
             {errors.length ? (

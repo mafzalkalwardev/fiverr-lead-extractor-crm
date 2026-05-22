@@ -12,6 +12,7 @@ import {
   LogOut,
   Shield,
   ScrollText,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { BrandLogo } from "@/components/branding";
 
 const userNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/setup", label: "System Setup", icon: Settings },
   { href: "/jobs/new", label: "Create Job", icon: PlusCircle },
   { href: "/jobs", label: "Live Monitor", icon: Activity },
   { href: "/leads", label: "Leads", icon: Users },
@@ -45,9 +47,14 @@ export function Sidebar() {
     }
   }, []);
 
-  const logout = () => {
+  const logout = async () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* ignore */
+    }
     window.location.href = "/login";
   };
 

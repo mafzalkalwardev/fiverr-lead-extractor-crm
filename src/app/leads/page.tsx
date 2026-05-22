@@ -27,6 +27,29 @@ function UrlCell({ url }: { url: string }) {
   );
 }
 
+function ReviewImageCell({ url }: { url: string }) {
+  if (!url) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="flex items-center gap-2 max-w-[200px]">
+      <img
+        src={url}
+        alt=""
+        className="h-10 w-10 rounded object-cover border border-border shrink-0"
+        loading="lazy"
+      />
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-primary text-xs break-all hover:underline line-clamp-2"
+        title={url}
+      >
+        Open
+      </a>
+    </div>
+  );
+}
+
 function LeadsContent() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -109,7 +132,7 @@ function LeadsContent() {
           {
             key: "reviewedImageLink",
             header: "Reviewed Image Link",
-            render: (r) => <UrlCell url={String(r.reviewedImageLink || "")} />,
+            render: (r) => <ReviewImageCell url={String(r.reviewedImageLink || "")} />,
           },
           { key: "serviceNiche", header: "Service/Niche" },
         ]}

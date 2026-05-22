@@ -84,9 +84,9 @@ export async function POST(req: NextRequest) {
 
     const limits = clampJobLimits({
       maxGigs: Number(body.maxGigs) || 10,
-      maxReviewsPerGig: Number(body.maxReviewsPerGig) || 20,
-      maxTotalLeads: Number(body.maxTotalLeads) || 100,
-      delaySeconds: Number(body.delaySeconds) || 3,
+      maxReviewsPerGig: Number(body.maxReviewsPerGig ?? 0),
+      maxTotalLeads: Number(body.maxTotalLeads) || 500,
+      delaySeconds: Number(body.delaySeconds) || 1,
     });
 
     let targetCountries = DEFAULT_TARGET_COUNTRIES;

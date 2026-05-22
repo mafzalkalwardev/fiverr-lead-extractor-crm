@@ -31,7 +31,7 @@ export default function LoginPage() {
       localStorage.setItem("user", JSON.stringify(data.user));
       toast({ title: "Welcome back", description: "Signed in successfully." });
       const user = data.user as { role?: string };
-      router.push(user.role === "admin" ? "/admin" : "/dashboard");
+      router.replace(user.role === "admin" ? "/admin" : "/dashboard");
     } catch (err) {
       toast({
         title: "Sign in failed",

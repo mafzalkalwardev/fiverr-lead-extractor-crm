@@ -156,8 +156,10 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
     queue = state["gig_queue"]
     start = state["resume_index"]
     max_leads = job.get("maxTotalLeads") or 100
-    delay = job.get("delaySeconds") or 3
-    max_reviews = job.get("maxReviewsPerGig") or 100
+    delay = job.get("delaySeconds") or 1
+    max_reviews = job.get("maxReviewsPerGig")
+    if max_reviews is None:
+        max_reviews = 0
 
     page = await new_page()
     try:
@@ -169,7 +171,10 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                 break
 
             gig_url = queue[i]
-            append_activity(job_id, f"Opening gig {i + 1}/{len(queue)}")
+            append_activity(
+                job_id,
+                f"Gig {i + 1}/{len(queue)} — extracting all US/CA reviews with images",
+            )
             update_job(
                 job_id,
                 {
@@ -191,7 +196,8 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                 update_job(job_id, {"currentSeller": gig.get("sellerName") or gig.get("sellerUsername") or ""})
                 append_activity(
                     job_id,
-                    f"Seller: {gig.get('sellerName')} · {len(reviews)} US/CA reviews",
+                    f"Gig done: {gig.get('sellerUsername')} — {len(reviews)} leads "
+                    f"({checked} review cards scanned)",
                 )
 
                 state["gigs_scanned"] += 1

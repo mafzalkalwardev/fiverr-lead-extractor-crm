@@ -13,7 +13,10 @@ BAD_REVIEWER_NAMES = re.compile(
     r"^(fiverr|seller|buyer|reviews?|show more|see more|helpful|customer|anonymous|\d+(\.\d+)?)$",
     re.I,
 )
-DELIVERY_IMAGE = re.compile(r"delivery|attachments|t_delivery|t_smartwm|/image/upload/", re.I)
+DELIVERY_IMAGE = re.compile(
+    r"delivery|attachments|t_delivery|t_smartwm|/image/upload/|cloudinary|fiverr-res|fiverrstatic|review",
+    re.I,
+)
 
 
 def now_utc():
@@ -124,11 +127,16 @@ def is_valid_reviewer_name(name: str) -> bool:
 def is_valid_review_image(url: str) -> bool:
     if not url or not url.startswith("http"):
         return False
-    if "fiverr" not in url.lower() or not DELIVERY_IMAGE.search(url):
+    lower = url.lower()
+    if not ("fiverr" in lower or "cloudinary" in lower):
         return False
-    if re.search(r"trophy|generic_asset|badge|avatar|\.gif", url, re.I):
+    if re.search(r"trophy|generic_asset|badge|avatar|profile|seller|\.gif", url, re.I):
         return False
-    return True
+    if DELIVERY_IMAGE.search(url):
+        return True
+    if re.search(r"\.(jpg|jpeg|png|webp)(\?|$)", url, re.I) and "fiverr" in lower:
+        return True
+    return False
 
 
 def is_valid_real_lead(gig: dict, review: dict) -> bool:

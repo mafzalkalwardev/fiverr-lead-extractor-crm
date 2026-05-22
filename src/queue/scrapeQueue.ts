@@ -1,5 +1,6 @@
 import "@/lib/load-env";
 import { Queue } from "bullmq";
+import { isPythonScraperEngine } from "@/lib/scraper-engine";
 import { createRedisConnection } from "./connection";
 
 export const SCRAPE_QUEUE_NAME = "scrape-jobs";
@@ -21,6 +22,13 @@ export function getScrapeQueue(): Queue {
 }
 
 export async function enqueueScrapeJob(jobId: string): Promise<void> {
+  if (isPythonScraperEngine()) {
+    console.log(
+      `[queue] SCRAPER_ENGINE=python — job ${jobId} waits for Python scraper (npm run scraper:py); BullMQ skipped`
+    );
+    return;
+  }
+
   const queue = getScrapeQueue();
   const bullId = `scrape-${jobId}`;
   const existing = await queue.getJob(bullId);

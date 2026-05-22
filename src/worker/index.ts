@@ -1,9 +1,17 @@
 import "@/lib/load-env";
+import { isPythonScraperEngine } from "@/lib/scraper-engine";
 import { Worker } from "bullmq";
 import { createRedisConnection } from "@/queue/connection";
 import { SCRAPE_QUEUE_NAME } from "@/queue/scrapeQueue";
 import { closeBrowser, warmBrowser } from "@/scraper/live/browser";
 import { processScrapeJob } from "./processJob";
+
+if (isPythonScraperEngine()) {
+  console.log(
+    "[worker] SCRAPER_ENGINE=python — Node worker disabled. Use: npm run scraper:py"
+  );
+  process.exit(0);
+}
 
 const connection = createRedisConnection();
 const redisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6380";

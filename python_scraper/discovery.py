@@ -7,6 +7,7 @@ from playwright.async_api import Page
 
 import config
 from browser import new_page
+from db import append_activity
 from utils import normalize_fiverr_url
 from verification import assert_page_accessible, is_verification_page, wait_until_verification_clears
 
@@ -91,6 +92,10 @@ async def discover_gig_urls(
             print(f"[discovery] Search page {page_num}: {url}")
             await page.goto(url, wait_until="domcontentloaded", timeout=90_000)
             await asyncio.sleep(config.DISCOVERY_PAGE_WAIT_SEC)
+
+            from verification import try_auto_clear_verification
+
+            await try_auto_clear_verification(page, job_id)
 
             if await is_verification_page(page):
                 cleared = await wait_until_verification_clears(page, job_id, url)

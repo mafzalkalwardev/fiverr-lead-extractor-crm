@@ -116,13 +116,21 @@ async def _launch_persistent(channel: Optional[str]) -> BrowserContext:
 
 
 async def _install_resource_filter(ctx: BrowserContext) -> None:
-    """Block images/fonts/media to cut bandwidth and RAM (review URLs still come from DOM)."""
+    """Block third-party heavy assets; allow Fiverr/Cloudinary images for review attachments."""
 
     async def handler(route) -> None:
-        if route.request.resource_type in ("image", "font", "media"):
+        req = route.request
+        url = (req.url or "").lower()
+        if req.resource_type in ("image", "media"):
+            if "fiverr" in url or "cloudinary" in url:
+                await route.continue_()
+            else:
+                await route.abort()
+            return
+        if req.resource_type == "font" and "fiverr" not in url:
             await route.abort()
-        else:
-            await route.continue_()
+            return
+        await route.continue_()
 
     await ctx.route("**/*", handler)
 

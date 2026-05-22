@@ -35,7 +35,7 @@ export async function POST(
     });
     await appendJobLog(
       id,
-      "Manual retry requested. Worker will continue using the existing persistent browser session."
+      "Retry queued — Python scraper will resume from saved gig index."
     );
 
     await enqueueScrapeJob(id);

@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     await logActivity("user_login", `${user.email} logged in`, user._id);
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       token,
       user: {
         id: user._id,
@@ -51,6 +51,16 @@ export async function POST(req: NextRequest) {
         status: user.status,
       },
     });
+
+    res.cookies.set("token", token, {
+      httpOnly: true,
+      path: "/",
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 24 * 7,
+    });
+
+    return res;
   } catch (err) {
     if (isDbConnectionError(err)) {
       return NextResponse.json(

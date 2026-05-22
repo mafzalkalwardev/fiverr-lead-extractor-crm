@@ -95,6 +95,12 @@ export default function JobMonitorPage() {
 
   const errors = job.errors || job.jobErrors || [];
   const isVerification = job.status === "verification_required";
+  const browserClosedError = errors.some((e) =>
+    /browser.*closed|Target page, context or browser/i.test(e)
+  );
+  const canRetry =
+    isVerification ||
+    (job.status === "failed" && browserClosedError);
 
   return (
     <DashboardLayout>
@@ -125,10 +131,10 @@ export default function JobMonitorPage() {
           <Button variant="outline" size="sm" onClick={exportLeads} className="gap-1">
             <Download className="h-4 w-4" /> Export
           </Button>
-          {isVerification && (
+          {canRetry && (
             <>
               <Button variant="outline" size="sm" onClick={openBrowser} className="gap-1">
-                <ExternalLink className="h-4 w-4" /> Open Browser
+                <ExternalLink className="h-4 w-4" /> Open Gig Link
               </Button>
               <Button size="sm" onClick={retryJob} className="gap-1">
                 <RefreshCw className="h-4 w-4" /> Retry
@@ -145,15 +151,19 @@ export default function JobMonitorPage() {
 
       <WorkerStatusBanner />
 
-      {isVerification && (
+      {canRetry && (
         <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/15 px-4 py-4 text-sm">
           <p className="font-medium text-amber-200">
             {job.verificationMessage ||
-              "Fiverr verification required. Complete it in the opened browser, then click Retry."}
+              "Action needed in the Chrome window that opens with this app."}
           </p>
+          <ol className="text-xs text-muted-foreground mt-2 list-decimal list-inside space-y-1">
+            <li>Look for the Chrome window opened by FT Solutions (not your normal browser).</li>
+            <li>Complete any Fiverr “Press & Hold” or sign-in check there.</li>
+            <li>Leave that window open and click <strong>Retry</strong> below.</li>
+          </ol>
           <p className="text-xs text-muted-foreground mt-2">
-            Progress is saved (gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}). We do
-            not bypass CAPTCHA — solve it manually, then Retry.
+            Progress saved — gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.
           </p>
         </div>
       )}

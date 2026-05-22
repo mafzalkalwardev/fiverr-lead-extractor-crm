@@ -2,6 +2,7 @@ import "@/lib/load-env";
 import { Worker } from "bullmq";
 import { createRedisConnection } from "@/queue/connection";
 import { SCRAPE_QUEUE_NAME } from "@/queue/scrapeQueue";
+import { warmBrowser } from "@/scraper/live/browser";
 import { processScrapeJob } from "./processJob";
 
 const connection = createRedisConnection();
@@ -43,3 +44,7 @@ console.log(`[worker] SCRAPER_MODE=${process.env.SCRAPER_MODE || "playwright"}`)
 console.log(`[worker] PLAYWRIGHT_HEADLESS=${process.env.PLAYWRIGHT_HEADLESS ?? "false"}`);
 console.log("[worker] Waiting for jobs...");
 console.log("[worker] First time? Run: npm run setup:browser (complete Fiverr verification once)");
+
+warmBrowser().catch((err) => {
+  console.warn("[worker] Browser warm-up failed (will retry on first job):", err);
+});

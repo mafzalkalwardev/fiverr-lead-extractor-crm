@@ -36,6 +36,8 @@ export async function assertPageAccessible(page: Page): Promise<void> {
     throw new ScraperVerificationRequiredError();
   }
   if (await isHardBlocked(page)) {
-    throw new ScraperBlockedError("Fiverr access denied. Try Manual URL or HTML Import mode.");
+    throw new ScraperBlockedError(
+      "Fiverr access denied. Use Paste Gig Links mode or complete verification and Retry."
+    );
   }
 }

@@ -10,7 +10,11 @@ import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/providers/toast-provider";
 import { DEFAULT_TARGET_COUNTRIES, TARGET_COUNTRY_OPTIONS } from "@/lib/constants";
-import { EXTRACTION_MODE_LABELS, type ExtractionMode } from "@/lib/extraction-modes";
+import {
+  CLIENT_EXTRACTION_MODES,
+  EXTRACTION_MODE_LABELS,
+  type ExtractionMode,
+} from "@/lib/extraction-modes";
 import type { ScrapeJob } from "@/types";
 import { WorkerStatusBanner } from "@/components/worker-status-banner";
 import { cn } from "@/lib/utils";
@@ -121,9 +125,13 @@ export default function NewJobPage() {
 
       <WorkerStatusBanner />
 
-      <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-        Live scraping may be blocked by Fiverr verification. Use{" "}
-        <strong>Manual URL</strong> or <strong>HTML Import</strong> for reliable extraction.
+      <div className="mb-4 rounded-md border border-primary/30 bg-primary/10 px-4 py-3 text-sm">
+        <p className="font-medium">First time setup</p>
+        <p className="text-muted-foreground mt-1 text-xs">
+          A Chrome window opens automatically when you start a job. If Fiverr asks for
+          verification, complete it in that window, click <strong>Retry</strong> on the job page,
+          and do not close Chrome while extraction runs.
+        </p>
       </div>
 
       <Card className="max-w-2xl">
@@ -133,8 +141,8 @@ export default function NewJobPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="grid gap-2 sm:grid-cols-3">
-              {(["live", "manual_urls", "html_import"] as ExtractionMode[]).map((m) => (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {CLIENT_EXTRACTION_MODES.map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -172,8 +180,8 @@ export default function NewJobPage() {
                   onChange={(e) => setManualUrls(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Open gigs in your normal browser, copy URLs here. App opens each URL to extract
-                  reviews if accessible.
+                  On Fiverr.com, open any gig → copy the address bar link → paste one URL per line.
+                  No technical skills needed.
                 </p>
               </div>
             )}

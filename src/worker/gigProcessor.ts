@@ -9,6 +9,7 @@ import {
   ScraperVerificationRequiredError,
 } from "@/scraper/types";
 import type { ScraperAdapter } from "@/scraper/types";
+import { isBrowserClosedError, resetBrowser } from "@/scraper/live/browser";
 
 export interface GigProcessorState {
   gigsScanned: number;
@@ -116,6 +117,21 @@ export async function processGigList(
           $push: { errorLog: err.message },
         });
         return "blocked";
+      }
+      if (isBrowserClosedError(err)) {
+        await resetBrowser();
+        await ScrapeJob.findByIdAndUpdate(jobId, {
+          status: "verification_required",
+          verificationMessage: VERIFICATION_MESSAGE,
+          currentGigLink: gigUrl,
+          gigQueue: gigUrls,
+          resumeIndex: i,
+        });
+        await appendJobLog(
+          jobId,
+          "Browser was closed — a new window will open on Retry. Do not close the Chrome window during jobs."
+        );
+        return "verification_required";
       }
       state.failedGigs += 1;
       const msg = err instanceof Error ? err.message : String(err);

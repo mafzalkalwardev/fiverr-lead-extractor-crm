@@ -2,13 +2,16 @@ export const EXTRACTION_MODES = ["live", "manual_urls", "html_import"] as const;
 export type ExtractionMode = (typeof EXTRACTION_MODES)[number];
 
 export const EXTRACTION_MODE_LABELS: Record<ExtractionMode, string> = {
-  live: "Live Mode (Playwright search)",
-  manual_urls: "Manual Browser Mode (paste gig URLs)",
-  html_import: "HTML Import Mode (upload saved pages)",
+  live: "Automatic Search (recommended)",
+  manual_urls: "Paste Gig Links",
+  html_import: "HTML Import (admin only)",
 };
 
+/** Modes shown on Create Job — no HTML upload for end clients */
+export const CLIENT_EXTRACTION_MODES = ["live", "manual_urls"] as const;
+
 export const VERIFICATION_MESSAGE =
-  "Fiverr verification required. Complete it in the opened browser, then click Retry.";
+  "Complete Fiverr verification in the Chrome window that opens automatically, then click Retry. Keep that window open while jobs run.";
 
 export function parseGigUrlsFromText(text: string): string[] {
   const urls = text.match(/https?:\/\/[^\s]+/g) || [];

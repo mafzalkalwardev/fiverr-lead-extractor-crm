@@ -24,19 +24,7 @@ export async function discoverGigUrls(
     return { gigUrls: existingQueue, source: "cached_queue", blockedOnFiverr: false };
   }
 
-  // 1) SearX JSON (reliable, no Fiverr hit)
-  const searxUrls = await discoverGigsViaSearx(niche, maxGigs);
-  if (searxUrls.length > 0) {
-    return { gigUrls: searxUrls, source: "search_engine", blockedOnFiverr: false };
-  }
-
-  // 2) HTTP HTML search fallback
-  const httpUrls = await discoverGigsViaHttpSearch(niche, maxGigs);
-  if (httpUrls.length > 0) {
-    return { gigUrls: httpUrls, source: "search_engine", blockedOnFiverr: false };
-  }
-
-  // 2) Fiverr search via Playwright
+  // 1) Fiverr search via Playwright (best for logged-in / verified session)
   const fiverrPage = await newLivePage();
   try {
     const results = await runSearch(fiverrPage, niche, maxGigs);
@@ -52,7 +40,19 @@ export async function discoverGigUrls(
       console.warn("[discovery] Fiverr search error:", err);
     }
   } finally {
-    await fiverrPage.close();
+    await fiverrPage.close().catch(() => {});
+  }
+
+  // 2) SearX JSON fallback
+  const searxUrls = await discoverGigsViaSearx(niche, maxGigs);
+  if (searxUrls.length > 0) {
+    return { gigUrls: searxUrls, source: "search_engine", blockedOnFiverr: false };
+  }
+
+  // 3) HTTP HTML search fallback
+  const httpUrls = await discoverGigsViaHttpSearch(niche, maxGigs);
+  if (httpUrls.length > 0) {
+    return { gigUrls: httpUrls, source: "search_engine", blockedOnFiverr: false };
   }
 
   return { gigUrls: [], source: "search_engine", blockedOnFiverr: true };

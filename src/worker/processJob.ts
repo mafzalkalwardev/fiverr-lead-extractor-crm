@@ -136,7 +136,7 @@ export async function processScrapeJob(jobId: string): Promise<void> {
             verificationMessage: VERIFICATION_MESSAGE,
             $push: {
               errorLog:
-                "No gig URLs discovered. Complete Fiverr verification in browser-profile window, then Retry. Or use Manual URL / HTML Import mode.",
+                "No gig URLs discovered. Complete Fiverr verification in the Chrome window, then Retry. Or use Paste Gig Links mode.",
             },
           });
           await appendJobLog(jobId, "No URLs — paused for verification");
@@ -185,6 +185,21 @@ export async function processScrapeJob(jobId: string): Promise<void> {
       return;
     }
     const msg = err instanceof Error ? err.message : String(err);
+    const { isBrowserClosedError, resetBrowser } = await import("@/scraper/live/browser");
+    if (isBrowserClosedError(err)) {
+      await resetBrowser();
+      await ScrapeJob.findByIdAndUpdate(jobId, {
+        status: "verification_required",
+        verificationMessage: VERIFICATION_MESSAGE,
+        $push: {
+          errorLog:
+            "Browser window was closed. Click Retry — keep the Chrome window open while extracting.",
+        },
+      });
+      await appendJobLog(jobId, "Browser closed — click Retry (do not close Chrome during jobs)");
+      finalStatus = "verification_required";
+      return;
+    }
     await ScrapeJob.findByIdAndUpdate(jobId, { status: "failed", $push: { errorLog: msg } });
     await appendJobLog(jobId, `Failed: ${msg}`);
     throw err;

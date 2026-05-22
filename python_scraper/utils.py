@@ -17,6 +17,10 @@ DELIVERY_IMAGE = re.compile(
     r"delivery|attachments|t_delivery|t_smartwm|/image/upload/|cloudinary|fiverr-res|fiverrstatic|review",
     re.I,
 )
+COUNTRY_IN_TEXT = re.compile(
+    r"\b(United States|USA|U\.S\.?|Canada)\b",
+    re.I,
+)
 
 
 def now_utc():
@@ -52,6 +56,20 @@ def is_target_country(country: str, targets: list[str]) -> bool:
         return False
     target_set = {normalize_country(t).lower() for t in targets}
     return norm.lower() in target_set
+
+
+def username_from_gig_url(url: str) -> str:
+    """First path segment on fiverr.com/{username}/... — canonical seller id."""
+    try:
+        parts = [p for p in urlparse(url).path.strip("/").split("/") if p]
+        if not parts:
+            return ""
+        first = parts[0].lower()
+        if first in BLOCKED_PATH_PREFIXES:
+            return ""
+        return parts[0]
+    except Exception:
+        return ""
 
 
 def normalize_fiverr_url(href: str) -> Optional[str]:
@@ -111,17 +129,156 @@ def is_valid_seller_name(name: str, username: str, gig_title: str) -> bool:
     return bool(re.match(r"^[a-zA-Z0-9_\-\s'.]{2,80}$", n))
 
 
+def looks_like_rating(value: str) -> bool:
+    n = clean_text(value)
+    if not n:
+        return True
+    if re.match(r"^\d+(\.\d+)?$", n):
+        return True
+    if re.match(r"^[1-5](?:\.\d)?$", n):
+        return True
+    if re.search(r"\bstars?\b", n, re.I):
+        return True
+    return False
+
+
+def _slug_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _name_is_seller(name: str, seller_username: str) -> bool:
+    """Skip when inferred text refers to the gig seller, not the buyer."""
+    seller = _slug_key(seller_username)
+    if not seller:
+        return False
+    return _slug_key(name) == seller
+
+
+def infer_reviewer_from_text(review_text: str, seller_username: str = "") -> str:
+    """Guess buyer name from review body when DOM only exposes star rating."""
+    text = clean_text(review_text)
+    if len(text) < 20:
+        return ""
+    seller = clean_text(seller_username)
+
+    name_cap = r"([A-Za-z][A-Za-z0-9_.'-]+(?:\s+[A-Za-z][A-Za-z0-9_.'-]+){0,3})"
+    patterns = [
+        r"(?:great experience with|experience with|pleasure with|working with|thanks to|recommend)\s+"
+        r"([A-Za-z][A-Za-z0-9_.'-]+)",
+        r"^([A-Za-z][A-Za-z0-9_.'-]{1,40})\s+"
+        r"(?:did|was|is|has|truly|really|always|delivered|provided|went|made|took|helped|gave|"
+        r"exceptional|fantastic|great|excellent|outstanding|once|just|another|absolute)\b",
+        r"^([A-Za-z][A-Za-z0-9_.'-]{1,40})\s+truly\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if not m:
+            continue
+        name = clean_text(m.group(1)).lstrip("@").rstrip(".")
+        if _name_is_seller(name, seller):
+            continue
+        if is_valid_reviewer_name(name):
+            return name
+    return ""
+
+
+def reviewer_name_before_country(text: str) -> str:
+    """
+    Fiverr review cards: [Reviewer Name] [Country] [Rating] [Review body...]
+    Take the label immediately before the country — not the rating after it.
+    """
+    raw = clean_text(text)
+    if len(raw) < 10:
+        return ""
+    m = COUNTRY_IN_TEXT.search(raw)
+    if not m:
+        return ""
+
+    before = raw[: m.start()].strip()
+    before = re.sub(r"^[1-5](?:\.\d)?\s*", "", before).strip()
+    before = re.sub(
+        r"\b\d+\s+(?:day|days|week|weeks|month|months|year|years)\s+ago\b",
+        "",
+        before,
+        flags=re.I,
+    ).strip()
+    before = re.sub(r"\b(?:published|posted|replied)\b.*$", "", before, flags=re.I).strip()
+
+    candidates: list[str] = []
+    if before:
+        candidates.append(before)
+        words = before.split()
+        for n in range(min(4, len(words)), 0, -1):
+            candidates.append(" ".join(words[-n:]))
+
+    for cand in candidates:
+        name = clean_text(cand).lstrip("@").rstrip(".")
+        if name and not looks_like_rating(name) and is_valid_reviewer_name(name):
+            return name
+    return ""
+
+
+def parse_rating_after_country(text: str) -> float:
+    """Rating sits after country in Fiverr review card chrome."""
+    raw = clean_text(text)
+    m = COUNTRY_IN_TEXT.search(raw)
+    if m:
+        tail = raw[m.end() : m.end() + 40]
+        rm = re.search(r"^\s*([1-5](?:\.\d)?)\b", tail)
+        if rm:
+            v = float(rm.group(1))
+            if 1 <= v <= 5:
+                return v
+    m = re.search(r"\b([1-5](?:\.\d)?)\b(?=.*\b(?:stars?|rating)\b)", raw, re.I)
+    if m:
+        v = float(m.group(1))
+        if 1 <= v <= 5:
+            return v
+    return 5.0
+
+
+def resolve_reviewer_name(review: dict, gig: dict) -> str:
+    seller = username_from_gig_url(gig.get("gigUrl", "")) or clean_text(
+        gig.get("sellerUsername") or ""
+    )
+    card_text = clean_text(review.get("cardText") or review.get("reviewText") or "")
+
+    from_country = reviewer_name_before_country(card_text)
+    if from_country and not _name_is_seller(from_country, seller):
+        return from_country
+
+    raw = clean_text(review.get("reviewerName", "")).lstrip("@")
+    if raw and not looks_like_rating(raw) and is_valid_reviewer_name(raw):
+        if not _name_is_seller(raw, seller):
+            return raw
+
+    inferred = infer_reviewer_from_text(review.get("reviewText", ""), seller)
+    if inferred:
+        return inferred
+    return ""
+
+
+def seller_name_from_gig(gig: dict) -> str:
+    """Canonical seller id — always from gig URL path, never page brand 'Fiverr'."""
+    url = clean_text(gig.get("gigUrl") or gig.get("gigLink") or "")
+    slug = username_from_gig_url(url)
+    if slug and slug.lower() != "fiverr" and not looks_like_rating(slug):
+        return slug
+    return ""
+
+
 def is_valid_reviewer_name(name: str) -> bool:
     n = clean_text(name).lstrip("@")
-    if len(n) < 2 or len(n) > 50:
+    if len(n) < 2 or len(n) > 60:
         return False
     if BAD_REVIEWER_NAMES.match(n):
         return False
-    if re.match(r"^\d+(\.\d+)?$", n):
+    if looks_like_rating(n):
         return False
-    if " " in n and len(n.split()) > 4:
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_'. -]{1,59}$", n):
         return False
-    return bool(re.match(r"^[a-zA-Z0-9_][a-zA-Z0-9_\-\.]{1,49}$", n))
+    words = n.split()
+    return 1 <= len(words) <= 4
 
 
 def is_valid_review_image(url: str) -> bool:
@@ -143,19 +300,16 @@ def is_valid_real_lead(gig: dict, review: dict) -> bool:
     if not is_valid_fiverr_url(gig.get("gigUrl", "")):
         return False
 
-    username = clean_text(gig.get("sellerUsername") or "")
-    seller = clean_text(gig.get("sellerName") or username)
-    if not username or len(username) < 2:
-        return False
-    if BAD_SELLER_NAMES.match(seller) or BAD_SELLER_NAMES.match(username):
+    seller_name = seller_name_from_gig(gig)
+    if not seller_name:
         return False
 
     title = clean_text(gig.get("gigTitle"))
     if len(title) < 3:
         return False
 
-    reviewer = clean_text(review.get("reviewerName"))
-    if not is_valid_reviewer_name(reviewer):
+    reviewer = clean_text(review.get("reviewerName", "")).lstrip("@")
+    if looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
         return False
 
     text = clean_text(review.get("reviewText"))

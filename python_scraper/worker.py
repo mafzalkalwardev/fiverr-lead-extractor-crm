@@ -3,7 +3,12 @@ import re
 from pathlib import Path
 
 import config
-from browser import is_browser_closed_error, new_page, reset_browser
+from browser import (
+    get_work_page,
+    is_browser_closed_error,
+    release_work_page_after_job,
+    reset_browser,
+)
 from db import (
     append_activity,
     get_job,
@@ -14,8 +19,9 @@ from db import (
 )
 from discovery import discover_gig_urls
 from gig_parser import extract_gig_metadata, open_gig_page
+from page_data import enrich_gig_from_page_json
 from review_parser import extract_reviews
-from utils import count_lead_bucket, normalize_fiverr_url
+from utils import count_lead_bucket, normalize_fiverr_url, seller_name_from_gig
 from verification import BlockedError, VerificationRequiredError, wait_until_verification_clears
 
 
@@ -149,7 +155,8 @@ async def _save_reviews(job: dict, job_id: str, gig: dict, reviews: list[dict], 
             elif bucket == "canada":
                 state["canada_leads"] += 1
             total += 1
-            append_activity(job_id, f"Lead saved: {review['reviewerName']} ({country})")
+            rn = review.get("reviewerName", "")
+            append_activity(job_id, f"Lead saved: {rn} ({country})")
 
 
 async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
@@ -161,9 +168,8 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
     if max_reviews is None:
         max_reviews = 0
 
-    page = await new_page()
-    try:
-        for i in range(start, len(queue)):
+    page = await get_work_page()
+    for i in range(start, len(queue)):
             current = get_job(job_id)
             if current and current.get("status") == "stopped":
                 return "stopped"
@@ -191,13 +197,20 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                     await asyncio.sleep(delay)
                 final_url = await open_gig_page(page, gig_url, job_id)
                 gig = await extract_gig_metadata(page, final_url, job_id)
-                reviews, checked = await extract_reviews(page, max_reviews, job_id)
+                gig = await enrich_gig_from_page_json(page, gig)
+                reviews, checked = await extract_reviews(
+                    page,
+                    max_reviews,
+                    job_id,
+                    gig.get("sellerUsername") or "",
+                )
 
-                update_job(job_id, {"currentSeller": gig.get("sellerName") or gig.get("sellerUsername") or ""})
+                seller_label = seller_name_from_gig(gig) or gig.get("sellerUsername") or ""
+                update_job(job_id, {"currentSeller": seller_label})
                 append_activity(
                     job_id,
-                    f"Gig done: {gig.get('sellerUsername')} — {len(reviews)} leads "
-                    f"({checked} review cards scanned)",
+                    f"Gig {i + 1}/{len(queue)} done · seller={seller_label} · {len(reviews)} leads "
+                    f"({checked} reviews scanned)",
                 )
 
                 state["gigs_scanned"] += 1
@@ -219,10 +232,6 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                 cleared = await wait_until_verification_clears(page, job_id, gig_url)
                 if cleared:
                     state["resume_index"] = i
-                    try:
-                        await page.close()
-                    except Exception:
-                        pass
                     return await process_gig_list(job, job_id, state)
                 return "verification_required"
 
@@ -245,20 +254,16 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                     append_activity(job_id, "Browser closed — reopening on next poll. Keep Chrome open.")
                     return "verification_required"
                 state["failed_gigs"] += 1
-                push_error(job_id, f"{gig_url}: {err}")
+                err_msg = str(err).encode("ascii", errors="replace").decode("ascii")
+                push_error(job_id, f"{gig_url}: {err_msg}")
                 refresh_job_counters(job_id, state)
-    finally:
-        try:
-            if not page.is_closed():
-                await page.close()
-        except Exception:
-            pass
 
     update_job(
         job_id,
         {"status": "completed", "progressPercent": 100, "currentGigLink": "", "currentSeller": ""},
     )
     append_activity(job_id, f"Completed · {state['us_leads'] + state['canada_leads']} leads")
+    await release_work_page_after_job()
     return "completed"
 
 
@@ -273,8 +278,13 @@ async def process_job(job: dict) -> None:
     mode = job.get("extractionMode") or "live"
     state = _initial_state(job)
 
-    append_activity(job_id, f'Started · mode={mode} · niche="{niche}"')
+    max_gigs_log = job.get("maxGigs")
+    append_activity(
+        job_id,
+        f'Started · mode={mode} · niche="{niche}" · maxGigs={max_gigs_log} (0=all)',
+    )
     update_job(job_id, {"status": "running", "verificationMessage": ""})
+    append_activity(job_id, "Opening Fiverr scraper browser (one window for this job)")
 
     try:
         if mode == "html_import":
@@ -297,13 +307,24 @@ async def process_job(job: dict) -> None:
         queue = list(job.get("gigQueue") or [])
         if not queue:
             update_job(job_id, {"status": "discovering_gigs"})
-            max_gigs = job.get("maxGigs") or 50
-            max_pages = config.MAX_SEARCH_PAGES
+            max_gigs = job.get("maxGigs")
+            if max_gigs is None:
+                max_gigs = 0
+            if config.MAX_SEARCH_PAGES > 0:
+                pages_note = f"up to {config.MAX_SEARCH_PAGES} search pages"
+            else:
+                pages_note = "all search pages until the last page"
+            gigs_note = (
+                "all gigs from search"
+                if max_gigs <= 0
+                else f"up to {max_gigs} gigs"
+            )
             append_activity(
                 job_id,
-                f"Discovering gigs — search pages 1–{max_pages} (up to {max_gigs} gigs)",
+                f"Discovering gigs — {pages_note} ({gigs_note})",
             )
-            urls, source = await discover_gig_urls(niche, max_gigs, job_id, max_pages=max_pages)
+            update_job(job_id, {"currentSearchPage": 0, "discoveryPagesScanned": 0})
+            urls, source = await discover_gig_urls(niche, max_gigs, job_id)
             queue = urls
             update_job(
                 job_id,

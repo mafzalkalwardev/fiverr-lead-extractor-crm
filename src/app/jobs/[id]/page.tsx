@@ -104,7 +104,11 @@ export default function JobMonitorPage() {
   const statusHint: Record<string, string> = {
     pending: "Queued — Python scraper will pick this up",
     running: "Python scraper active",
-    discovering_gigs: "Searching Fiverr for gig URLs",
+    discovering_gigs: job.currentSearchPage
+      ? `Searching Fiverr — search page ${job.currentSearchPage}${
+          job.discoveryPageLimit ? ` of ${job.discoveryPageLimit}` : ""
+        }`
+      : "Searching Fiverr for gig URLs",
     extracting_reviews: "Finishing all reviews on current gig, then next gig",
     verification_required: "Press & Hold — auto assist running in browser",
     blocked: "Blocked by Fiverr",
@@ -179,10 +183,28 @@ export default function JobMonitorPage() {
       <Card className="mb-6 border-border/80 shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold">Activity log</CardTitle>
-          {job.discoverySource && (
+          {(job.discoverySource || job.status === "discovering_gigs") && (
             <p className="text-sm text-muted-foreground">
-              Discovery: <span className="text-primary font-medium">{job.discoverySource}</span>
+              {job.status === "discovering_gigs" && job.currentSearchPage ? (
+                <>
+                  Search page{" "}
+                  <span className="text-primary font-medium">{job.currentSearchPage}</span>
+                  {job.discoveryPageLimit
+                    ? ` / ${job.discoveryPageLimit}`
+                    : " (all pages until last)"}
+                </>
+              ) : null}
+              {job.discoverySource && (
+                <>
+                  {job.status === "discovering_gigs" && job.currentSearchPage ? " · " : null}
+                  Discovery:{" "}
+                  <span className="text-primary font-medium">{job.discoverySource}</span>
+                </>
+              )}
               {job.urlsDiscovered != null && ` · ${job.urlsDiscovered} gigs`}
+              {job.discoveryPagesScanned != null && job.discoveryPagesScanned > 0
+                ? ` · ${job.discoveryPagesScanned} pages scanned`
+                : ""}
             </p>
           )}
         </CardHeader>
@@ -209,6 +231,17 @@ export default function JobMonitorPage() {
           <CardContent className="space-y-4">
             <Progress value={job.progressPercent} />
             <div className="grid grid-cols-2 gap-3 text-sm">
+              {job.status === "discovering_gigs" && (job.currentSearchPage ?? 0) > 0 && (
+                <div className="col-span-2">
+                  <p className="text-muted-foreground">Search page</p>
+                  <p className="text-xl font-bold text-primary">
+                    Page {job.currentSearchPage}
+                    {job.discoveryPageLimit
+                      ? ` / ${job.discoveryPageLimit}`
+                      : " — scraping all pages"}
+                  </p>
+                </div>
+              )}
               <div>
                 <p className="text-muted-foreground">Gigs scanned</p>
                 <p className="text-xl font-bold">{job.gigsScanned}</p>

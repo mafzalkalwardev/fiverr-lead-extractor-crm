@@ -1,6 +1,6 @@
 import Lead from "@/models/Lead";
 import type { ReviewData, GigData } from "@/scraper/types";
-import { isValidRealLead } from "./lead-validation";
+import { isValidRealLead, resolveReviewerName, sellerNameFromGig } from "./lead-validation";
 import type { Types } from "mongoose";
 
 /** Dedupe: Gig Link + Reviewer Name + Review */
@@ -59,14 +59,17 @@ export async function saveLeadIfQualified(
     return { saved: false, country, reason: "non_target_country" };
   }
 
-  if (!isValidRealLead(input.gig, input.review)) {
+  const reviewerName = resolveReviewerName(input.review, input.gig);
+  const reviewForSave = { ...input.review, reviewerName };
+
+  if (!isValidRealLead(input.gig, reviewForSave)) {
     return { saved: false, country, reason: "invalid_real_lead" };
   }
 
-  const sellerName = (input.gig.sellerName || input.gig.sellerUsername || "").trim();
+  const sellerName = sellerNameFromGig(input.gig);
   const dedupeKey = buildDedupeKey(
     input.gig.gigUrl,
-    input.review.reviewerName.trim(),
+    reviewerName.trim(),
     input.review.reviewText.trim()
   );
 
@@ -77,7 +80,7 @@ export async function saveLeadIfQualified(
       sellerName,
       gigLink: input.gig.gigUrl.trim(),
       gigTitle: input.gig.gigTitle.trim(),
-      reviewerName: input.review.reviewerName.trim(),
+      reviewerName: reviewerName.trim(),
       country,
       review: input.review.reviewText.trim(),
       reviewRating: input.review.reviewRating,

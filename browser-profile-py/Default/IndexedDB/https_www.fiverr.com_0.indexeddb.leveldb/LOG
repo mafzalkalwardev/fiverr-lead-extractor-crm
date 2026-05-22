@@ -1,4 +1,24 @@
-2026/05/22-13:06:17.900 4668 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/MANIFEST-000001
-2026/05/22-13:06:17.903 4668 Recovering log #24
-2026/05/22-13:06:17.904 4668 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/000024.log 
-2026/05/22-13:06:17.905 4668 Delete type=2 #22
+2026/05/22-15:23:48.156 4d04 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/05/22-15:23:48.157 4d04 Recovering log #121
+2026/05/22-15:23:48.157 4d04 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/000121.log 
+2026/05/22-15:23:49.937 4d04 Level-0 table #126: started
+2026/05/22-15:23:49.962 4d04 Level-0 table #126: 1438 bytes OK
+2026/05/22-15:23:49.972 4d04 Delete type=0 #121
+2026/05/22-15:23:49.973 4d04 Manual compaction at level-0 from '\x008\x00\x00\x00' @ 72057594037927935 : 1 .. '\x009\x00\x00\x00' @ 0 : 0; will stop at '\x009\x00\x00\x05' @ 975 : 1
+2026/05/22-15:23:49.973 4d04 Compacting 1@0 + 1@1 files
+2026/05/22-15:23:49.992 4d04 Generated table #127@0: 127 keys, 2582 bytes
+2026/05/22-15:23:49.993 4d04 Compacted 1@0 + 1@1 files => 2582 bytes
+2026/05/22-15:23:49.996 4d04 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/05/22-15:23:49.998 4d04 Delete type=2 #126
+2026/05/22-15:23:50.003 4d04 Manual compaction at level-0 from '\x009\x00\x00\x05' @ 975 : 1 .. '\x009\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/05/22-15:23:50.014 77c Level-0 table #129: started
+2026/05/22-15:23:50.035 77c Level-0 table #129: 543 bytes OK
+2026/05/22-15:23:50.037 77c Delete type=2 #123
+2026/05/22-15:23:50.037 77c Delete type=0 #125
+2026/05/22-15:23:50.039 4d04 Manual compaction at level-0 from '\x00:\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00;\x00\x00\x00' @ 0 : 0; will stop at '\x00:\x00\x00\x05' @ 992 : 1
+2026/05/22-15:23:50.039 4d04 Compacting 1@0 + 1@1 files
+2026/05/22-15:23:50.056 4d04 Generated table #130@0: 128 keys, 2588 bytes
+2026/05/22-15:23:50.056 4d04 Compacted 1@0 + 1@1 files => 2588 bytes
+2026/05/22-15:23:50.058 4d04 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/05/22-15:23:50.059 4d04 Delete type=2 #129
+2026/05/22-15:23:50.059 4d04 Manual compaction at level-0 from '\x00:\x00\x00\x05' @ 992 : 1 .. '\x00;\x00\x00\x00' @ 0 : 0; will stop at (end)

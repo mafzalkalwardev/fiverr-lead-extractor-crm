@@ -8,15 +8,26 @@ import config
 from utils import (
     absolutize_url,
     clean_text,
+    infer_reviewer_from_text,
     is_valid_review_image,
     is_valid_reviewer_name,
+    looks_like_rating,
     normalize_country,
+    parse_rating_after_country,
+    reviewer_name_before_country,
 )
 from db import append_activity
 from dom_extract import extract_reviews_from_dom
+from page_data import extract_reviews_from_page_json
 from verification import assert_page_accessible
 
-REVIEW_ROOT = '[class*="reviews" i], #reviews, [data-testid*="reviews" i]'
+# Avoid gig-page carousel / description expanders (causes timeouts & wrong clicks)
+REVIEW_SECTION = (
+    '[data-testid="reviews-tab-panel"], [data-testid*="reviews-tab" i], '
+    '#reviews-tab, section:has([data-testid*="review-card" i]), '
+    '[class*="reviews-package" i], [class*="reviews-list" i]'
+)
+REVIEW_ROOT = '[data-testid="reviews-tab-panel"], [data-testid*="review-card" i]'
 REVIEW_CARD_SELECTORS = [
     '[data-testid*="review-card" i]',
     '[class*="review-card" i]',
@@ -54,42 +65,60 @@ def _image_from_srcset(srcset: str) -> str:
 async def scroll_to_reviews(page: Page) -> None:
     tab = page.get_by_role("tab", name=re.compile(r"reviews", re.I)).first
     if await tab.count() and await tab.is_visible():
-        await tab.click()
-        await asyncio.sleep(0.8)
+        try:
+            await tab.click(timeout=5000)
+            await asyncio.sleep(1.0)
+        except Exception:
+            pass
 
-    for label in ("Reviews", "See all reviews", "Show all reviews"):
-        btn = page.get_by_text(label, exact=False).first
-        if await btn.count() and await btn.is_visible():
-            await btn.click()
-            await asyncio.sleep(0.6)
-
-    section = page.locator(REVIEW_ROOT).first
+    section = page.locator(REVIEW_SECTION).first
     if await section.count():
-        await section.scroll_into_view_if_needed(timeout=5000)
+        try:
+            await section.scroll_into_view_if_needed(timeout=8000)
+        except Exception:
+            pass
+    else:
+        for _ in range(6):
+            await page.mouse.wheel(0, 1100)
+            await asyncio.sleep(0.35)
 
-    await asyncio.sleep(0.8)
-    for _ in range(5):
-        await page.mouse.wheel(0, 900)
+    await asyncio.sleep(0.6)
+    for _ in range(4):
+        await page.mouse.wheel(0, 800)
         await asyncio.sleep(0.25)
 
 
 async def click_load_more(page: Page, max_clicks: int = 50) -> int:
-    pattern = page.locator(
-        'button:has-text("Show more"), button:has-text("See more"), '
-        'button:has-text("Load more"), button:has-text("Show More"), '
-        'button:has-text("See all")'
-    )
+    """Only click load-more inside buyer reviews — not gig description 'See more'."""
     clicks = 0
+    scope = page.locator(REVIEW_SECTION).first
+    if not await scope.count():
+        scope = page
+
     for _ in range(max_clicks):
-        btn = pattern.first
-        if not await btn.count() or not await btn.is_visible():
-            break
         try:
-            await btn.scroll_into_view_if_needed(timeout=2000)
-            await btn.click(timeout=3000)
+            clicked = await scope.evaluate(
+                """(root) => {
+                  if (!root) return false;
+                  const bad = /expand-description|expand-button|gig-description/i;
+                  const btns = root.querySelectorAll('button, [role="button"]');
+                  for (const b of btns) {
+                    const t = (b.innerText || '').trim();
+                    const cls = (b.className || '') + (b.getAttribute('class') || '');
+                    if (bad.test(cls)) continue;
+                    if (!/^(show more|see more|load more|show more reviews|see all reviews)$/i.test(t)) continue;
+                    if (t.length > 40) continue;
+                    b.click();
+                    return true;
+                  }
+                  return false;
+                }"""
+            )
+            if not clicked:
+                break
             clicks += 1
-            await asyncio.sleep(0.9)
-            await page.mouse.wheel(0, 500)
+            await asyncio.sleep(0.85)
+            await page.mouse.wheel(0, 400)
         except Exception:
             break
     return clicks
@@ -126,40 +155,166 @@ async def _find_country(card: Locator, card_text: str) -> str:
 
 
 def _parse_rating(text: str) -> float:
-    m = re.search(r"\b([1-5](?:\.\d)?)\b(?=.*\b(?:stars?|rating)\b)", text, re.I)
+    return parse_rating_after_country(text)
+
+
+async def _reviewer_before_country_dom(card: Locator) -> str:
+    """DOM: reviewer label is the sibling/segment before country (rating comes after)."""
+    try:
+        raw = await card.evaluate(
+            """(el) => {
+              const isRating = (t) => /^[1-5](?:\\.\\d)?$/.test((t||'').trim()) || /^\\d+(?:\\.\\d+)?$/.test((t||'').trim());
+              const ok = (t) => {
+                t = (t||'').trim().replace(/^@/, '');
+                return t.length >= 2 && t.length <= 60 && /^[a-zA-Z]/.test(t) && !isRating(t);
+              };
+              const countryPat = /\\b(United States|USA|U\\.S\\.?|Canada)\\b/i;
+              const full = (el.innerText||'').replace(/\\s+/g,' ').trim();
+              const m = full.match(countryPat);
+              if (m && m.index > 0) {
+                let before = full.slice(0, m.index).trim();
+                before = before.replace(/^[1-5](?:\\.\\d)?\\s*/, '').trim();
+                const lines = before.split(/\\n/).map(s => s.trim()).filter(Boolean);
+                for (let i = lines.length - 1; i >= 0; i--) {
+                  if (ok(lines[i])) return lines[i];
+                }
+                const words = before.split(/\\s+/);
+                for (let n = Math.min(4, words.length); n >= 1; n--) {
+                  const cand = words.slice(-n).join(' ');
+                  if (ok(cand)) return cand;
+                }
+              }
+              for (const node of el.querySelectorAll('*')) {
+                const t = (node.innerText||'').trim();
+                if (!countryPat.test(t) || t.length > 40) continue;
+                let prev = node.previousElementSibling;
+                while (prev) {
+                  const pt = (prev.innerText||'').trim().split('\\n')[0].replace(/^@/,'').trim();
+                  if (ok(pt)) return pt;
+                  prev = prev.previousElementSibling;
+                }
+              }
+              return '';
+            }"""
+        )
+        name = clean_text(str(raw or "")).lstrip("@")
+        if name and not looks_like_rating(name) and is_valid_reviewer_name(name):
+            return name
+    except Exception:
+        pass
+    return ""
+
+
+def _fix_reviewer_from_json(
+    reviewer: str, card_text: str, json_reviews: list[dict]
+) -> str:
+    if reviewer and not looks_like_rating(reviewer) and is_valid_reviewer_name(reviewer):
+        return reviewer
+    key = card_text[:120].lower()
+    for jr in json_reviews:
+        jt = (jr.get("reviewText") or "")[:120].lower()
+        if not jt:
+            continue
+        if key[:60] in jt or jt[:60] in key:
+            name = clean_text(jr.get("reviewerName", ""))
+            if name and is_valid_reviewer_name(name):
+                return name
+    return reviewer
+
+
+def _reviewer_from_href(href: str) -> str:
+    m = re.search(r"/users/([^/?#]+)", href or "", re.I)
     if not m:
-        m = re.search(r"\b([1-5](?:\.\d)?)\s*/\s*5\b", text, re.I)
-    if m:
-        v = float(m.group(1))
-        if 1 <= v <= 5:
-            return v
-    m = re.search(r"\b([1-5])\s*star", text, re.I)
-    if m:
-        return float(m.group(1))
-    return 5.0
+        return ""
+    return clean_text(m.group(1)).lstrip("@")
 
 
-async def _reviewer_name(card: Locator, card_text: str) -> str:
+async def _reviewer_from_card_js(card: Locator, seller_username: str) -> str:
+    try:
+        raw = await card.evaluate(
+            """(el, seller) => {
+              const isRating = (t) => /^[1-5](?:\\.\\d)?$/.test(t) || /^\\d+(?:\\.\\d+)?$/.test(t);
+              const ok = (t) => {
+                t = (t || "").trim().replace(/^@/, "");
+                return t.length >= 2 && t.length <= 60 && /^[a-zA-Z]/.test(t) && !isRating(t);
+              };
+              const sellerL = (seller || "").toLowerCase();
+              for (const sel of [
+                '[data-testid*="reviewer" i]',
+                '[class*="buyer" i] a',
+                '[class*="reviewer" i] a',
+                '[class*="user-name" i]',
+                '[class*="username" i]',
+                'a[href*="/users/"]',
+              ]) {
+                for (const n of el.querySelectorAll(sel)) {
+                  const t = (n.innerText || "").trim();
+                  if (ok(t) && t.toLowerCase() !== sellerL) return t.replace(/^@/, "");
+                  const h = n.getAttribute("href") || "";
+                  const um = h.match(/\\/users\\/([^/?#]+)/i);
+                  if (um && ok(um[1]) && um[1].toLowerCase() !== sellerL) return um[1];
+                }
+              }
+              for (const a of el.querySelectorAll('a[href^="/"]')) {
+                const h = a.getAttribute("href") || "";
+                if (/\\/users\\/|inbox|search|categories|login|join/i.test(h)) continue;
+                const parts = h.replace(/^\\//, "").split("/").filter(Boolean);
+                if (parts.length === 1 && parts[0].toLowerCase() !== sellerL && ok(parts[0]))
+                  return parts[0];
+              }
+              return "";
+            }""",
+            seller_username or "",
+        )
+        name = clean_text(str(raw or "")).lstrip("@")
+        if name and not looks_like_rating(name) and is_valid_reviewer_name(name):
+            return name
+    except Exception:
+        pass
+    return ""
+
+
+async def _reviewer_name(card: Locator, card_text: str, seller_username: str = "") -> str:
+    js_name = await _reviewer_from_card_js(card, seller_username)
+    if js_name:
+        return js_name
+
+    user_links = card.locator('a[href*="/users/"]')
+    for i in range(min(await user_links.count(), 8)):
+        link = user_links.nth(i)
+        href = await link.get_attribute("href") or ""
+        slug = _reviewer_from_href(href)
+        if slug and is_valid_reviewer_name(slug):
+            return slug
+        t = clean_text(await link.inner_text(timeout=800)).lstrip("@")
+        if t and not looks_like_rating(t) and is_valid_reviewer_name(t):
+            return t
+
     for sel in (
-        'a[href^="/"]',
+        '[data-testid*="reviewer" i] a',
         '[data-testid*="reviewer" i]',
         '[class*="reviewer" i] a',
+        '[class*="buyer" i] a',
         '[class*="username" i]',
-        "h4",
-        "strong",
+        '[class*="user-name" i]',
     ):
         loc = card.locator(sel)
         for i in range(min(await loc.count(), 8)):
             href = await loc.nth(i).get_attribute("href") or ""
-            if "/users/" in href or "/inbox" in href:
-                continue
+            slug = _reviewer_from_href(href)
+            if slug and is_valid_reviewer_name(slug):
+                return slug
             t = clean_text(await loc.nth(i).inner_text(timeout=800)).lstrip("@")
-            if is_valid_reviewer_name(t):
+            if t and not looks_like_rating(t) and is_valid_reviewer_name(t):
                 return t
 
-    m = re.search(r"(?:reviewed by|by)\s+([a-zA-Z0-9_]{2,40})", card_text, re.I)
-    if m and is_valid_reviewer_name(m.group(1)):
-        return m.group(1)
+    inferred = infer_reviewer_from_text(card_text, seller_username)
+    if inferred:
+        return inferred
+
+    m = re.search(r"(?:reviewed by|by)\s+([a-zA-Z][a-zA-Z0-9_'. -]{1,50})", card_text, re.I)
+    if m and is_valid_reviewer_name(m.group(1).strip()):
+        return m.group(1).strip()
 
     return ""
 
@@ -296,6 +451,7 @@ async def extract_reviews(
     page: Page,
     max_reviews: int,
     job_id: str,
+    seller_username: str = "",
 ) -> tuple[list[dict], int]:
     """
     Load all visible reviews on the current gig page, then return US/CA reviews with images.
@@ -305,6 +461,10 @@ async def extract_reviews(
     if not unlimited and max_reviews < 1:
         max_reviews = 500
 
+    # Primary: embedded page JSON (__NEXT_DATA__ / Perseus) — stable buyer usernames
+    json_reviews = await extract_reviews_from_page_json(page, seller_username)
+    parsed: list[dict] = list(json_reviews)
+
     await scroll_to_reviews(page)
     load_clicks = await click_load_more(page, max_clicks=config.REVIEW_LOAD_MORE_MAX)
     if load_clicks:
@@ -313,8 +473,10 @@ async def extract_reviews(
     await assert_page_accessible(page, job_id)
 
     candidates = await _collect_review_cards(page)
-    parsed: list[dict] = []
-    checked = 0
+    checked = len(json_reviews)
+    seen_keys = {
+        f"{r['reviewerName']}|{r['reviewText'][:80].lower()}" for r in parsed
+    }
 
     for card, card_text in candidates:
         checked += 1
@@ -328,11 +490,18 @@ async def extract_reviews(
         if not image or not is_valid_review_image(image):
             continue
 
-        reviewer = await _reviewer_name(card, card_text)
-        if not is_valid_reviewer_name(reviewer):
+        reviewer = await _reviewer_before_country_dom(card)
+        if not reviewer:
+            reviewer = reviewer_name_before_country(card_text)
+        if not reviewer:
+            reviewer = await _reviewer_name(card, card_text, seller_username)
+        reviewer = _fix_reviewer_from_json(reviewer, card_text, json_reviews)
+        if not reviewer or looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
+            reviewer = infer_reviewer_from_text(card_text, seller_username)
+        if not reviewer or looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
             continue
 
-        rating = _parse_rating(card_text)
+        rating = parse_rating_after_country(card_text)
         text = await _review_text(card, card_text, reviewer, norm)
         if len(text) < 15:
             continue
@@ -346,6 +515,10 @@ async def extract_reviews(
             except Exception:
                 pass
 
+        key = f"{reviewer}|{text[:80].lower()}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
         parsed.append(
             {
                 "reviewerName": reviewer,
@@ -354,11 +527,12 @@ async def extract_reviews(
                 "reviewRating": rating,
                 "reviewDate": review_date,
                 "reviewedImageLink": image,
+                "cardText": card_text,
             }
         )
 
     if len(parsed) < 1:
-        dom_list = await extract_reviews_from_dom(page)
+        dom_list = await extract_reviews_from_dom(page, seller_username)
         seen_keys = {
             f"{r['reviewerName']}|{r['reviewText'][:80].lower()}" for r in parsed
         }

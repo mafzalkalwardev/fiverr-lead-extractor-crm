@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -19,14 +20,18 @@ VERIFICATION_TIMEOUT_SEC = int(os.getenv("PYTHON_VERIFICATION_TIMEOUT_SEC", "600
 PLAYWRIGHT_HEADLESS = os.getenv("PLAYWRIGHT_HEADLESS", "false").lower() == "true"
 KEEP_BROWSER_PROFILE = os.getenv("KEEP_BROWSER_PROFILE", "true").lower() == "true"
 
-# Bundled Playwright Chromium is default (avoids "profile already in use" with system Chrome on Windows).
-# Set PYTHON_USE_SYSTEM_CHROME=true to use installed Google Chrome via PLAYWRIGHT_CHANNEL.
-_use_system = os.getenv("PYTHON_USE_SYSTEM_CHROME", "").lower() == "true"
-PLAYWRIGHT_CHANNEL = (
-    (os.getenv("PYTHON_PLAYWRIGHT_CHANNEL") or os.getenv("PLAYWRIGHT_CHANNEL") or "chrome")
-    if _use_system
-    else (os.getenv("PYTHON_PLAYWRIGHT_CHANNEL") or None)
-)
+# Python scraper: bundled Playwright Chromium only unless PYTHON_USE_SYSTEM_CHROME=true.
+# PLAYWRIGHT_CHANNEL in .env is for the legacy Node worker — ignored here by default.
+_use_system = os.getenv("PYTHON_USE_SYSTEM_CHROME", "false").lower() == "true"
+PLAYWRIGHT_CHANNEL: Optional[str]
+if _use_system:
+    PLAYWRIGHT_CHANNEL = (
+        os.getenv("PYTHON_PLAYWRIGHT_CHANNEL")
+        or os.getenv("PLAYWRIGHT_CHANNEL")
+        or "chrome"
+    )
+else:
+    PLAYWRIGHT_CHANNEL = os.getenv("PYTHON_PLAYWRIGHT_CHANNEL") or None
 
 # Separate from Node/legacy profile to avoid SingletonLock conflicts on Windows
 _profile = os.getenv("PYTHON_BROWSER_PROFILE", "browser-profile-py")
@@ -50,5 +55,7 @@ HEARTBEAT_COLLECTION = "system_heartbeats"
 HEARTBEAT_ID = "python_scraper"
 
 STALE_RUNNING_MINUTES = int(os.getenv("PYTHON_STALE_JOB_MINUTES", "2"))
-MAX_SEARCH_PAGES = int(os.getenv("MAX_PAGES_LIMIT", "10"))
+# 0 = paginate through all search result pages (until last page / safety cap)
+MAX_SEARCH_PAGES = int(os.getenv("MAX_PAGES_LIMIT", "0"))
+MAX_SEARCH_PAGES_SAFETY = int(os.getenv("MAX_SEARCH_PAGES_SAFETY", "100"))
 PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "5"))

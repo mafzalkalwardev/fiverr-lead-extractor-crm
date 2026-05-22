@@ -37,6 +37,9 @@ export interface ScrapeJob {
   verificationMessage?: string;
   discoverySource?: string;
   urlsDiscovered?: number;
+  currentSearchPage?: number;
+  discoveryPagesScanned?: number;
+  discoveryPageLimit?: number;
   activityLog?: string[];
   createdAt: string;
   updatedAt: string;

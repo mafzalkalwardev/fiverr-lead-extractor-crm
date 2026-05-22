@@ -50,7 +50,9 @@ npm run setup:browser:py
 
 Double-click:
 
-**`Start Fiverr Lead CRM.bat`**
+**`Start Fiverr Lead CRM.bat`** (daily use — fast start)
+
+If the page shows errors, run once: **`Repair Start.bat`**
 
 (in the project folder — copy a shortcut to the client’s Desktop)
 
@@ -111,7 +113,7 @@ PLAYWRIGHT_HEADLESS=false
 BLOCK_HEAVY_RESOURCES=true
 PYTHON_SCRAPER_POLL_SEC=1.5
 DEFAULT_DELAY_SECONDS=2
-MAX_PAGES_LIMIT=10
+MAX_PAGES_LIMIT=0
 ```
 
 - `BLOCK_HEAVY_RESOURCES=true` — faster pages, less RAM (review image URLs still captured from HTML).

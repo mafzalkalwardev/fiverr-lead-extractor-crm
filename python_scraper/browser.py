@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -9,8 +11,10 @@ import config
 _context: Optional[BrowserContext] = None
 _playwright = None
 _launch_lock = asyncio.Lock()
+_work_page: Optional[Page] = None
 
 LOCK_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile")
+LOCK_GLOBS = ("**/SingletonLock", "**/SingletonCookie", "**/SingletonSocket")
 
 
 def is_browser_closed_error(err: Exception) -> bool:
@@ -28,20 +32,68 @@ def is_profile_in_use_error(err: Exception) -> bool:
     )
 
 
-def release_profile_lock(profile_dir: Path) -> None:
-    """Remove stale Chromium lock files after a crashed run."""
+def release_profile_lock(profile_dir: Path) -> int:
+    removed = 0
+    if not profile_dir.exists():
+        return 0
+
+    candidates: list[Path] = []
     for name in LOCK_FILES:
-        target = profile_dir / name
-        if target.exists():
-            try:
-                target.unlink()
-                print(f"[browser] Removed stale lock: {name}")
-            except OSError as e:
-                print(f"[browser] Could not remove {name}: {e}")
+        candidates.extend([profile_dir / name, profile_dir / "Default" / name])
+    for pattern in LOCK_GLOBS:
+        try:
+            candidates.extend(profile_dir.glob(pattern))
+        except OSError:
+            pass
+
+    seen: set[str] = set()
+    for target in candidates:
+        key = str(target)
+        if key in seen or not target.exists():
+            continue
+        seen.add(key)
+        try:
+            target.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def kill_playwright_chrome_only() -> None:
+    """Kill only Chromium launched for this app (not the user's normal Chrome)."""
+    if sys.platform != "win32":
+        return
+    try:
+        subprocess.run(
+            [
+                "powershell",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-NoProfile",
+                "-Command",
+                (
+                    "Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" -EA 0 | "
+                    "Where-Object { $_.CommandLine -match 'browser-profile-py|ms-playwright' } | "
+                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA 0 }"
+                ),
+            ],
+            cwd=str(config.ROOT_DIR),
+            timeout=15,
+            capture_output=True,
+        )
+    except Exception:
+        pass
+
+
+def prepare_browser_profile(profile_dir: Path) -> None:
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    release_profile_lock(profile_dir)
 
 
 async def reset_browser() -> None:
-    global _context, _playwright
+    global _context, _playwright, _work_page
+    _work_page = None
     if _context:
         try:
             await _context.close()
@@ -64,8 +116,8 @@ def _context_alive(ctx: BrowserContext) -> bool:
         return False
 
 
-def _launch_kwargs(channel: Optional[str]) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {
+def _launch_kwargs() -> dict[str, Any]:
+    return {
         "headless": config.PLAYWRIGHT_HEADLESS,
         "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -78,46 +130,19 @@ def _launch_kwargs(channel: Optional[str]) -> dict[str, Any]:
             "--disable-blink-features=AutomationControlled",
             "--no-sandbox",
             "--disable-dev-shm-usage",
-            "--disable-gpu",
             "--disable-extensions",
-            "--disable-background-networking",
-            "--disable-default-apps",
             "--disable-sync",
             "--disable-translate",
-            "--metrics-recording-only",
             "--mute-audio",
+            "--no-first-run",
+            "--no-default-browser-check",
         ],
         "extra_http_headers": {"Accept-Language": "en-US,en;q=0.9"},
         "ignore_default_args": ["--enable-automation"],
     }
-    if channel:
-        kwargs["channel"] = channel
-    return kwargs
-
-
-async def _launch_persistent(channel: Optional[str]) -> BrowserContext:
-    global _playwright
-    if not _playwright:
-        _playwright = await async_playwright().start()
-
-    label = channel or "playwright-chromium"
-    print(
-        f"[browser] Launching ({label}) profile={config.BROWSER_PROFILE_DIR} "
-        f"headless={config.PLAYWRIGHT_HEADLESS}"
-    )
-    ctx = await _playwright.chromium.launch_persistent_context(
-        str(config.BROWSER_PROFILE_DIR),
-        **_launch_kwargs(channel),
-    )
-    ctx.on("close", lambda: _set_context_none())
-    if config.BLOCK_HEAVY_RESOURCES:
-        await _install_resource_filter(ctx)
-    return ctx
 
 
 async def _install_resource_filter(ctx: BrowserContext) -> None:
-    """Block third-party heavy assets; allow Fiverr/Cloudinary images for review attachments."""
-
     async def handler(route) -> None:
         req = route.request
         url = (req.url or "").lower()
@@ -135,7 +160,22 @@ async def _install_resource_filter(ctx: BrowserContext) -> None:
     await ctx.route("**/*", handler)
 
 
+async def _normalize_single_tab(ctx: BrowserContext) -> Page:
+    """One window, one tab — close any extra tabs Playwright opens."""
+    pages = list(ctx.pages)
+    for extra in pages[1:]:
+        try:
+            await extra.close()
+        except Exception:
+            pass
+    if ctx.pages:
+        return ctx.pages[0]
+    page = await ctx.new_page()
+    return page
+
+
 async def launch_browser() -> BrowserContext:
+    """Launch scraper Chromium once (bundled Playwright only)."""
     global _context
 
     async with _launch_lock:
@@ -145,66 +185,86 @@ async def launch_browser() -> BrowserContext:
         if _context:
             await reset_browser()
 
-        config.BROWSER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        prepare_browser_profile(config.BROWSER_PROFILE_DIR)
 
-        # Build launch attempts: bundled Chromium first (most reliable on Windows)
-        attempts: list[Optional[str]] = []
-        if config.PLAYWRIGHT_CHANNEL:
-            attempts.append(config.PLAYWRIGHT_CHANNEL)
-        attempts.append(None)  # bundled Playwright Chromium
+        if not _playwright:
+            _playwright = await async_playwright().start()
 
         last_err: Optional[Exception] = None
-        for channel in attempts:
-            for clear_lock in (False, True):
-                if clear_lock:
-                    release_profile_lock(config.BROWSER_PROFILE_DIR)
-                try:
-                    _context = await _launch_persistent(channel)
-                    return _context
-                except Exception as err:
-                    last_err = err
-                    if is_profile_in_use_error(err):
-                        print(f"[browser] Profile busy ({channel or 'chromium'}), retrying…")
-                        await reset_browser()
-                        continue
-                    raise
+        for clear_lock in (False, True):
+            if clear_lock:
+                release_profile_lock(config.BROWSER_PROFILE_DIR)
+                kill_playwright_chrome_only()
+            try:
+                print(
+                    f"[browser] Opening Fiverr scraper window "
+                    f"(profile={config.BROWSER_PROFILE_DIR.name})"
+                )
+                _context = await _playwright.chromium.launch_persistent_context(
+                    str(config.BROWSER_PROFILE_DIR),
+                    **_launch_kwargs(),
+                )
+                _context.on("close", lambda: _set_context_none())
+                if config.BLOCK_HEAVY_RESOURCES:
+                    await _install_resource_filter(_context)
+                await _normalize_single_tab(_context)
+                return _context
+            except Exception as err:
+                last_err = err
+                await reset_browser()
+                if not is_profile_in_use_error(err):
+                    break
 
-        hint = (
-            "Close all Chrome/Chromium windows opened for this app, then run again. "
-            "Or set PYTHON_USE_SYSTEM_CHROME=false in .env (default)."
-        )
+        hint = "Run: npm run free:browser — then start your job again."
         raise RuntimeError(f"Could not launch browser. {hint}") from last_err
 
 
 def _set_context_none():
-    global _context
+    global _context, _work_page
     _context = None
+    _work_page = None
 
 
-async def new_page() -> Page:
+async def get_work_page() -> Page:
+    """
+    Single scraper tab for the whole job (discovery + all gigs).
+    Browser window opens on first call — when a job starts, not at app startup.
+    """
+    global _work_page
+
     for attempt in range(3):
         try:
             ctx = await launch_browser()
-            page = await ctx.new_page()
-            page.set_default_timeout(60_000)
-            page.set_default_navigation_timeout(90_000)
-            return page
+            if _work_page and not _work_page.is_closed():
+                return _work_page
+
+            _work_page = await _normalize_single_tab(ctx)
+            _work_page.set_default_timeout(60_000)
+            _work_page.set_default_navigation_timeout(90_000)
+            return _work_page
         except Exception as err:
-            if attempt < 2 and (is_browser_closed_error(err) or is_profile_in_use_error(err)):
-                print("[browser] Relaunching after error…")
+            if attempt < 2 and (
+                is_browser_closed_error(err) or is_profile_in_use_error(err)
+            ):
                 await reset_browser()
                 release_profile_lock(config.BROWSER_PROFILE_DIR)
                 continue
             raise
-    raise RuntimeError("Failed to open browser page")
+    raise RuntimeError("Failed to open scraper page")
+
+
+async def new_page() -> Page:
+    """Backward compatible — returns the shared work tab (no extra windows)."""
+    return await get_work_page()
+
+
+async def release_work_page_after_job() -> None:
+    """Keep browser window open but clear tab reference for next job."""
+    global _work_page
+    _work_page = None
 
 
 async def warm_browser() -> None:
-    try:
-        ctx = await launch_browser()
-        if not ctx.pages:
-            page = await ctx.new_page()
-            await page.goto("about:blank", wait_until="domcontentloaded", timeout=30_000)
-        print("[browser] Ready — keep this browser window open while jobs run")
-    except Exception as err:
-        print(f"[browser] Warm-up failed (will retry on first job): {err}")
+    """No-op: browser opens only when a scrape job starts."""
+    print("[browser] Waiting for a job — scraper window opens when you start a job")
+

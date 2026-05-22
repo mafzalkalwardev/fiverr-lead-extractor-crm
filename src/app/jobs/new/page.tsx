@@ -29,7 +29,7 @@ export default function NewJobPage() {
   const [htmlFiles, setHtmlFiles] = useState<FileList | null>(null);
   const [countries, setCountries] = useState<string[]>([...DEFAULT_TARGET_COUNTRIES]);
   const [form, setForm] = useState({
-    maxGigs: 10,
+    maxGigs: 0,
     maxReviewsPerGig: 0,
     maxTotalLeads: 500,
     delaySeconds: 1,
@@ -228,11 +228,14 @@ export default function NewJobPage() {
                   <Label>Max Gigs</Label>
                   <Input
                     type="number"
-                    min={1}
-                    max={50}
+                    min={0}
+                    max={99999}
                     value={form.maxGigs}
                     onChange={(e) => setForm({ ...form, maxGigs: Number(e.target.value) })}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Use 0 to scrape every gig from every search page (no gig limit).
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Max Reviews / Gig</Label>

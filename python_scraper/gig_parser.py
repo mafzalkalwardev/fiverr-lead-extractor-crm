@@ -6,7 +6,14 @@ from urllib.parse import urlparse
 from playwright.async_api import Page
 
 import config
-from utils import absolutize_url, clean_text, is_valid_seller_name, normalize_fiverr_url
+from utils import (
+    absolutize_url,
+    clean_text,
+    is_valid_seller_name,
+    normalize_fiverr_url,
+    seller_name_from_gig,
+    username_from_gig_url,
+)
 from verification import assert_page_accessible
 
 TITLE_SELECTORS = [
@@ -139,13 +146,20 @@ async def extract_gig_metadata(page: Page, gig_url: str, job_id: str) -> dict:
         raise ValueError("Could not determine gig URL")
 
     gig_title = await _first_text(page, TITLE_SELECTORS)
-    path_user = username_from_url(final_url)
-    if not path_user:
+    path_user = username_from_gig_url(final_url) or username_from_url(final_url)
+    if not path_user or path_user.lower() == "fiverr":
         raise ValueError("Could not parse seller username from gig URL")
 
-    display = await _extract_seller_display(page, path_user, gig_title)
-    seller_username = path_user
-    seller_name = display if display else path_user
+    gig = {
+        "gigUrl": final_url,
+        "gigTitle": gig_title,
+        "sellerName": path_user,
+        "sellerUsername": path_user,
+        "mainGigImage": "",
+    }
+    slug = seller_name_from_gig(gig) or path_user
+    gig["sellerName"] = slug
+    gig["sellerUsername"] = slug
 
     if len(gig_title) < 3:
         raise ValueError("Gig title not found")
@@ -153,7 +167,7 @@ async def extract_gig_metadata(page: Page, gig_url: str, job_id: str) -> dict:
     return {
         "gigUrl": final_url,
         "gigTitle": gig_title,
-        "sellerName": seller_name,
-        "sellerUsername": seller_username,
+        "sellerName": slug,
+        "sellerUsername": slug,
         "mainGigImage": "",  # omitted from export — often wrong asset URLs
     }

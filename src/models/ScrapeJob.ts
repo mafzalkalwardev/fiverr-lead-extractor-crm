@@ -42,6 +42,10 @@ export interface IScrapeJob extends Document {
   verificationMessage: string;
   discoverySource: DiscoverySource;
   urlsDiscovered: number;
+  /** Live discovery: current Fiverr search results page being scraped */
+  currentSearchPage?: number;
+  discoveryPagesScanned?: number;
+  discoveryPageLimit?: number;
   activityLog: string[];
   keyword?: string;
   category?: string;
@@ -59,7 +63,7 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
       default: "live",
     },
     targetCountries: { type: [String], default: ["United States", "Canada"] },
-    maxGigs: { type: Number, default: 10 },
+    maxGigs: { type: Number, default: 0 },
     maxReviewsPerGig: { type: Number, default: 0 },
     maxTotalLeads: { type: Number, default: 100 },
     delaySeconds: { type: Number, default: 1 },
@@ -104,6 +108,9 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     verificationMessage: { type: String, default: "" },
     discoverySource: { type: String, default: "" },
     urlsDiscovered: { type: Number, default: 0 },
+    currentSearchPage: { type: Number, default: 0 },
+    discoveryPagesScanned: { type: Number, default: 0 },
+    discoveryPageLimit: { type: Number, default: 0 },
     activityLog: { type: [String], default: [] },
     keyword: { type: String, required: false },
     category: { type: String, required: false },

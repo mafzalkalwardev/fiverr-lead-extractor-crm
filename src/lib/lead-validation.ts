@@ -1,7 +1,101 @@
 import type { GigData, ReviewData } from "@/scraper/types";
 
 const BAD_SELLER = /^(fiverr|customer support|seller|reviews?)$/i;
-const BAD_REVIEWER = /^(fiverr|seller|\d+(\.\d+)?)$/i;
+const BLOCKED_PATH_PREFIXES = new Set([
+  "search",
+  "categories",
+  "users",
+  "support",
+  "login",
+  "join",
+  "inbox",
+  "collections",
+  "pro",
+  "cp",
+  "cart",
+  "checkout",
+]);
+
+export function usernameFromGigUrl(url: string): string {
+  try {
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    if (!parts.length) return "";
+    const first = parts[0].toLowerCase();
+    if (BLOCKED_PATH_PREFIXES.has(first)) return "";
+    return parts[0];
+  } catch {
+    return "";
+  }
+}
+const BAD_REVIEWER = /^(fiverr|seller|\d+(\.\d+)?|[1-5](?:\.\d)?)$/i;
+
+function looksLikeRating(value: string): boolean {
+  const n = value.trim();
+  if (!n) return true;
+  if (/^\d+(\.\d+)?$/.test(n)) return true;
+  if (/^[1-5](?:\.\d)?$/.test(n)) return true;
+  return false;
+}
+
+function slugKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function nameIsSeller(name: string, sellerUsername: string): boolean {
+  const seller = slugKey(sellerUsername);
+  if (!seller) return false;
+  return slugKey(name) === seller;
+}
+
+function inferReviewerFromText(reviewText: string, sellerUsername: string): string {
+  const text = reviewText.trim();
+  if (text.length < 20) return "";
+  const patterns = [
+    /(?:great experience with|experience with|pleasure with|working with|thanks to|recommend)\s+([A-Za-z][A-Za-z0-9_'. -]{1,50})/i,
+    /^([A-Za-z][A-Za-z0-9_'.-]*(?:\s+[A-Za-z][A-Za-z0-9_.'-]+){0,3})\s+(?:did|was|is|has|truly|really|always|delivered|provided|went|made|took|helped|gave|exceptional|fantastic|great|excellent|outstanding|once|just|another|absolute)\b/i,
+    /^([A-Za-z][A-Za-z0-9_'.-]{1,40})\s+truly\b/i,
+  ];
+  for (const pat of patterns) {
+    const m = text.match(pat);
+    if (!m) continue;
+    const name = m[1].trim().replace(/^@/, "").replace(/\.$/, "");
+    if (nameIsSeller(name, sellerUsername)) continue;
+    if (name.length >= 2 && !looksLikeRating(name) && !BAD_REVIEWER.test(name)) return name;
+  }
+  return "";
+}
+
+function reviewerNameBeforeCountry(text: string): string {
+  const raw = text.trim();
+  const m = raw.match(/\b(United States|USA|U\.S\.?|Canada)\b/i);
+  if (!m || m.index === undefined || m.index <= 0) return "";
+  let before = raw.slice(0, m.index).trim().replace(/^[1-5](?:\.\d)?\s*/, "");
+  const words = before.split(/\s+/);
+  for (let n = Math.min(4, words.length); n >= 1; n--) {
+    const cand = words.slice(-n).join(" ");
+    if (cand.length >= 2 && !looksLikeRating(cand) && !BAD_REVIEWER.test(cand)) return cand;
+  }
+  return before.length >= 2 && !looksLikeRating(before) && !BAD_REVIEWER.test(before) ? before : "";
+}
+
+export function sellerNameFromGig(gig: Pick<GigData, "gigUrl">): string {
+  const slug = usernameFromGigUrl(gig.gigUrl);
+  if (!slug || slug.toLowerCase() === "fiverr" || looksLikeRating(slug)) return "";
+  return slug;
+}
+
+export function resolveReviewerName(
+  review: Pick<ReviewData, "reviewerName" | "reviewText">,
+  gig: Pick<GigData, "gigUrl" | "sellerUsername" | "sellerName">
+): string {
+  const seller = usernameFromGigUrl(gig.gigUrl) || (gig.sellerUsername || "").trim();
+  const cardText = (review.reviewText || "").trim();
+  const fromCountry = reviewerNameBeforeCountry(cardText);
+  if (fromCountry) return fromCountry;
+  const raw = (review.reviewerName || "").trim().replace(/^@/, "");
+  if (raw && !looksLikeRating(raw) && !BAD_REVIEWER.test(raw)) return raw;
+  return inferReviewerFromText(review.reviewText || "", seller);
+}
 const REVIEW_IMAGE =
   /delivery|attachments|t_delivery|t_smartwm|\/image\/upload\/|cloudinary|fiverr-res|fiverrstatic|review/i;
 
@@ -18,14 +112,15 @@ function isFiverrUrl(value: string): boolean {
 export function isValidRealLead(gig: GigData, review: ReviewData): boolean {
   if (!isFiverrUrl(gig.gigUrl)) return false;
 
-  const seller = (gig.sellerUsername || gig.sellerName || "").trim();
+  const seller = sellerNameFromGig(gig);
   if (!seller || seller.length < 2 || BAD_SELLER.test(seller)) return false;
 
   const title = (gig.gigTitle || "").trim();
   if (!title || title.length < 3) return false;
 
-  const reviewer = (review.reviewerName || "").trim();
-  if (!reviewer || reviewer.length < 2 || BAD_REVIEWER.test(reviewer)) return false;
+  const reviewer = resolveReviewerName(review, gig);
+  if (!reviewer || reviewer.length < 2 || BAD_REVIEWER.test(reviewer) || looksLikeRating(reviewer))
+    return false;
 
   const text = (review.reviewText || "").trim();
   if (!text || text.length < 15) return false;

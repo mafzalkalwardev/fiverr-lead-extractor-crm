@@ -1,25 +1,37 @@
-# Stop processes locking the Fiverr scraper browser profile (run before npm run scraper:py)
+# Remove lock files only (optional -KillProcesses for Playwright Chrome only)
 $root = Split-Path $PSScriptRoot -Parent
 $profiles = @(
     (Join-Path $root "browser-profile"),
-    (Join-Path $root "browser-profile-py")
+    (Join-Path $root "browser-profile-py"),
+    (Join-Path $root "browser-profile-py-fresh")
 )
 
-Write-Host "Stopping Playwright/Chrome processes that may lock the profile..."
-Get-Process -Name "chrome", "chromium", "msedge" -ErrorAction SilentlyContinue | ForEach-Object {
-    try { $_.CloseMainWindow() | Out-Null } catch {}
+$kill = $args -contains "-KillProcesses"
+
+if ($kill) {
+    Write-Host "Stopping Playwright Chromium only..."
+    Get-CimInstance Win32_Process -Filter "name='chrome.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.CommandLine -match 'browser-profile|ms-playwright|playwright') {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-Host "Stopped PID $($_.ProcessId)"
+        }
+    }
+    Start-Sleep -Seconds 1
 }
-Start-Sleep -Seconds 2
-Get-Process -Name "chrome", "chromium" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 foreach ($dir in $profiles) {
     if (-not (Test-Path $dir)) { continue }
     foreach ($lock in @("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile")) {
-        $f = Join-Path $dir $lock
-        if (Test-Path $f) {
-            Remove-Item $f -Force -ErrorAction SilentlyContinue
-            Write-Host "Removed $f"
+        $paths = @(
+            (Join-Path $dir $lock),
+            (Join-Path (Join-Path $dir "Default") $lock)
+        )
+        foreach ($f in $paths) {
+            if (Test-Path $f) {
+                Remove-Item $f -Force -ErrorAction SilentlyContinue
+                Write-Host "Removed $f"
+            }
         }
     }
 }
-Write-Host "Done. Start: npm run scraper:py"
+Write-Host "Profile locks cleared."

@@ -12,8 +12,11 @@ from utils import (
     build_dedupe_key,
     is_target_country,
     is_valid_real_lead,
+    looks_like_rating,
     normalize_country,
     now_utc,
+    resolve_reviewer_name,
+    seller_name_from_gig,
 )
 
 _client: Optional[MongoClient] = None
@@ -116,11 +119,17 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         return False, country, "missing_country"
     if not is_target_country(country, targets):
         return False, country, "non_target_country"
+    reviewer_resolved = resolve_reviewer_name(review, gig)
+    if not reviewer_resolved:
+        return False, country, "invalid_real_lead"
+    review = {**review, "reviewerName": reviewer_resolved}
+
     if not is_valid_real_lead(gig, review):
         return False, country, "invalid_real_lead"
 
-    # Prefer URL username (e.g. ecomlaunch1) — never store "Fiverr" as seller
-    seller_name = (gig.get("sellerUsername") or gig.get("sellerName") or "").strip()
+    seller_name = seller_name_from_gig(gig)
+    if not seller_name:
+        return False, country, "invalid_seller"
     dedupe_key = build_dedupe_key(
         gig["gigUrl"],
         review["reviewerName"],

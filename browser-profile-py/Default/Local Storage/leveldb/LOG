@@ -1,3 +1,6 @@
-2026/05/22-13:41:53.697 68f8 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/MANIFEST-000001
-2026/05/22-13:41:53.710 68f8 Recovering log #3
-2026/05/22-13:41:53.714 68f8 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/000003.log 
+2026/05/22-15:20:06.043 1b1c Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/MANIFEST-000001
+2026/05/22-15:20:06.060 1b1c Recovering log #4
+2026/05/22-15:20:06.064 1b1c Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/000004.log 
+2026/05/22-15:21:16.133 2418 Level-0 table #8: started
+2026/05/22-15:21:16.146 2418 Level-0 table #8: 18392 bytes OK
+2026/05/22-15:21:16.159 2418 Delete type=0 #4

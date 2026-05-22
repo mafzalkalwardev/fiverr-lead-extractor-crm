@@ -83,7 +83,10 @@ export async function POST(req: NextRequest) {
     }
 
     const limits = clampJobLimits({
-      maxGigs: Number(body.maxGigs) || 10,
+      maxGigs:
+        body.maxGigs !== undefined && body.maxGigs !== null && body.maxGigs !== ""
+          ? Number(body.maxGigs)
+          : 0,
       maxReviewsPerGig: Number(body.maxReviewsPerGig ?? 0),
       maxTotalLeads: Number(body.maxTotalLeads) || 500,
       delaySeconds: Number(body.delaySeconds) || 1,

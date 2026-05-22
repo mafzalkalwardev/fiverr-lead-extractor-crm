@@ -31,5 +31,19 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    background-image: radial-gradient(
+      ellipse 120% 80% at 50% -30%,
+      hsl(142 76% 45% / 0.06),
+      transparent 55%
+    );
+  }
+}
+
+@layer utilities {
+  .page-title {
+    @apply text-2xl font-semibold tracking-tight text-foreground;
+  }
+  .page-subtitle {
+    @apply text-sm text-muted-foreground mt-1;
   }
 }

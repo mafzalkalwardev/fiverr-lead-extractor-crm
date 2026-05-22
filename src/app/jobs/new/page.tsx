@@ -126,11 +126,11 @@ export default function NewJobPage() {
       <WorkerStatusBanner />
 
       <div className="mb-4 rounded-md border border-primary/30 bg-primary/10 px-4 py-3 text-sm">
-        <p className="font-medium">First time setup</p>
+        <p className="font-medium">Automatic Search (recommended)</p>
         <p className="text-muted-foreground mt-1 text-xs">
-          A Chrome window opens automatically when you start a job. If Fiverr asks for
-          verification, complete it in that window, click <strong>Retry</strong> on the job page,
-          and do not close Chrome while extraction runs.
+          Walks Fiverr search page 1, 2, 3… then opens each gig and saves every US/Canada review that
+          includes a review image. Seller name is taken from the gig URL (e.g. ecomlaunch1). Press
+          &amp; Hold verification is handled automatically in the scraper browser.
         </p>
       </div>
 

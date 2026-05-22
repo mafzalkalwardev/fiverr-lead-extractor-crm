@@ -36,7 +36,7 @@ export class ScraperBlockedError extends Error {
   }
 }
 
-/** Human verification required — user must complete in browser, then Retry */
+/** Human verification required — user must complete it in the opened browser. */
 export class ScraperVerificationRequiredError extends Error {
   constructor(message = "Fiverr human verification required.") {
     super(message);

@@ -147,8 +147,15 @@ export async function POST(req: NextRequest) {
 
     console.log("[POST /api/jobs/start] created job:", jobId, extractionMode);
 
-    await enqueueScrapeJob(jobId);
-    console.log("[POST /api/jobs/start] queue ok:", jobId);
+    try {
+      await enqueueScrapeJob(jobId);
+      console.log("[POST /api/jobs/start] queue ok:", jobId);
+    } catch (queueErr) {
+      console.log(
+        "[POST /api/jobs/start] BullMQ skipped — Python scraper polls MongoDB:",
+        queueErr instanceof Error ? queueErr.message : queueErr
+      );
+    }
 
     await logActivity(
       "job_started",
@@ -167,7 +174,7 @@ export async function POST(req: NextRequest) {
     }
     if (isRedisConnectionError(err)) {
       return NextResponse.json(
-        { error: "Redis unavailable. Start Redis and npm run worker" },
+        { error: "Redis unavailable (optional). Start Python scraper: npm run scraper:py" },
         { status: 503 }
       );
     }

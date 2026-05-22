@@ -73,8 +73,8 @@ export interface ReviewExtractionResult {
   reviewsChecked: number;
 }
 
-function cleanText(value: string | null | undefined): string {
-  return (value || "").replace(/\s+/g, " ").trim();
+function cleanText(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function cleanCountryText(value: string): string {
@@ -295,6 +295,7 @@ async function findRating(card: Locator, cardText: string): Promise<number> {
 function isLikelyReviewerName(value: string): boolean {
   const text = cleanText(value).replace(/^@/, "");
   if (text.length < 2 || text.length > 60) return false;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return false;
   if (/^(from|seller|buyer|reviews?|helpful|show more|see more|contact|order|rating)$/i.test(text)) {
     return false;
   }

@@ -2,82 +2,157 @@
 
 **FT Solutions** · +92307-9670503
 
-**LIVE-ONLY** Fiverr lead extraction: real search → real gigs → real reviews → US/Canada filter → Excel export.
+Full-stack CRM (Next.js + Electron) with a **Python Playwright scraper** for reliable Fiverr lead extraction.
 
-> `SCRAPER_MODE` must be `playwright`. If extraction fails, nothing is fabricated.
+- **Next.js / Electron** — login, admin CRM, create jobs, live monitor, leads, Excel export  
+- **Python scraper** — Fiverr search, gig pages, verification wait, review extraction, MongoDB updates  
 
-## Live workflow
+No demo data. No fake fallbacks. No CAPTCHA bypass.
 
-1. User enters niche (e.g. `car wrap`)
-2. Opens `https://www.fiverr.com/search/gigs?query=...`
-3. Collects real gig URLs from search cards
-4. For each gig: seller name, gig link, title, main image
-5. Scrolls reviews, loads more, extracts reviewer/country/text/rating/date/image
-6. Saves **only** United States & Canada reviews
-7. Stops on max gigs, max leads, user stop, or Fiverr block/CAPTCHA
+## Architecture
 
-## Quick start (Windows PowerShell)
+```
+┌─────────────────────┐     MongoDB      ┌──────────────────────┐
+│  Next.js + Electron │ ◄──────────────► │  python_scraper/     │
+│  (UI + APIs)        │   jobs + leads   │  Playwright service  │
+└─────────────────────┘                  └──────────────────────┘
+```
+
+Jobs are created with `status: pending`. The Python service polls MongoDB and processes jobs automatically.
+
+**Handing off to a client?** See [CLIENT_DELIVERY.md](./CLIENT_DELIVERY.md).
+
+## Quick start (Windows)
+
+### 1. Node.js app
 
 ```powershell
 cd "C:\Users\pc\Desktop\Fiverr Scraper"
 npm install
-npx playwright install chromium
 npm run seed:admin
+```
 
-# Terminal 1 — Redis 5+
-powershell -ExecutionPolicy Bypass -File scripts\start-redis5.ps1
+### 2. Python scraper
 
-# Terminal 2 — App
+```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -r python_scraper\requirements.txt
+playwright install chromium
+```
+
+### 3. MongoDB
+
+Ensure MongoDB is running (default `mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm`).
+
+### 4. Run everything
+
+**Terminal A — app + scraper:**
+
+```powershell
+npm run dev:all
+```
+
+Or separately:
+
+```powershell
 npm run dev
-
-# Terminal 3 — Worker (required)
-npm run worker
+npm run scraper:py
 ```
 
-`.env` settings:
+**Electron desktop:**
 
+```powershell
+npm run electron:dev
 ```
+
+Open **http://localhost:3000** · Login: `admin@ftsolutions.local` / `Admin@FT2024`
+
+### 5. One-time Fiverr verification
+
+```powershell
+npm run free:browser
+npm run setup:browser:py
+```
+
+Complete “Press & Hold” in the browser window. Session is saved in `./browser-profile-py`.
+
+**Browser won’t start?** Another Chrome instance is using the profile:
+
+```powershell
+npm run free:browser
+npm run scraper:py
+```
+
+### Fix Next.js `routes-manifest.json` missing
+
+```powershell
+npm run clean
+npm run dev
+```
+
+Stop other `npm run dev` terminals first (only one dev server).
+
+## `.env` (scraper)
+
+```env
+MONGODB_URI=mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm
 SCRAPER_MODE=playwright
 PLAYWRIGHT_HEADLESS=false
+KEEP_BROWSER_PROFILE=true
+PLAYWRIGHT_CHANNEL=chrome
 ```
 
-Login: `admin@ftsolutions.local` / `Admin@FT2024`
+Redis is **optional** (legacy Node worker only).
 
-## Excel export
-
-- Sheet: **Fiverr Leads**
-- Columns: Seller Name, Gig Link, Gig Title, Reviewer Name, Country, Review, Reviewed Image Link, Main Gig Image, Service/Niche, Scraped At
-- Full URLs in cells (not "View"/"Image" labels)
-- Dedupe: Gig Link + Reviewer Name + Review
-
-## Scripts
+## npm scripts
 
 | Command | Description |
 |---------|-------------|
-| `npm run clean` | Clear `.next` cache |
 | `npm run dev` | Next.js dev server |
-| `npm run worker` | BullMQ live scrape worker |
-| `npm run dev:all` | Dev + worker |
-| `npm run build` | Production build |
-| `npm run electron:dev` | Dev + worker + Electron window |
-| `npm run electron:build` | Build + Electron |
+| `npm run scraper:py` | Python scraper service |
+| `npm run dev:all` | Dev + Python scraper |
+| `npm run worker` | Legacy Node/BullMQ worker (optional) |
+| `npm run setup:browser:py` | One-time Fiverr verification (Python) |
+| `npm run electron:dev` | Dev + Python scraper + Electron |
+| `npm run build` | Production Next.js build |
 
-## Fiverr CAPTCHA / PerimeterX
+## Python scraper layout
 
-Fiverr may show **"It needs a human touch"** for automated browsers. When this happens, the job is marked **blocked**.
+```
+python_scraper/
+  main.py           # Poll loop + heartbeat
+  config.py         # .env settings
+  db.py             # MongoDB jobs/leads
+  browser.py        # Persistent Chrome profile
+  discovery.py      # Fiverr search URL discovery
+  gig_parser.py     # Seller, title, main image
+  review_parser.py  # US/Canada reviews only
+  verification.py   # Wait for Press & Hold (2s poll)
+  worker.py         # Job processor
+  utils.py          # URLs, countries, dedupe
+  requirements.txt
+```
 
-**Fix (one-time):**
+## Verification flow
 
-1. Set `PLAYWRIGHT_HEADLESS=false` in `.env`
-2. Run `npm run worker` — a Chromium window opens
-3. Start a job; when Fiverr shows the challenge, complete it manually in that window
-4. Cookies are saved in `browser-profile/` for later runs
+1. Fiverr shows human verification → job `verification_required`
+2. Chrome stays open; Python checks every **2 seconds**
+3. When verification clears → extraction continues automatically
+4. User can also click **Retry** in the CRM (sets `pending` again)
 
-Optional: `PLAYWRIGHT_CHANNEL=chrome` to use installed Google Chrome.
+## Extraction modes (UI)
+
+- **Automatic Search** — niche → Fiverr search → gig URLs → reviews  
+- **Paste Gig Links** — one Fiverr URL per line (non-technical friendly)  
+
+## Excel export
+
+Sheet **Fiverr Leads** — full URLs, US/Canada only, dedupe by gig + reviewer + review text.
 
 ## Requirements
 
 - Node.js 18+
+- Python 3.11+
 - MongoDB
-- Redis **5.0+** (`scripts/start-redis5.ps1`)
-- Playwright Chromium (`npx playwright install chromium`)
+- Google Chrome (recommended via `PLAYWRIGHT_CHANNEL=chrome`)

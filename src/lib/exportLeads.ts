@@ -10,7 +10,6 @@ const LEAD_COLUMNS = [
   "Country",
   "Review",
   "Reviewed Image Link",
-  "Main Gig Image",
   "Service/Niche",
   "Scraped At",
 ] as const;
@@ -65,12 +64,11 @@ export async function buildLeadsExcel(
       l.country || "",
       l.review || "",
       l.reviewedImageLink || "",
-      l.mainGigImage || "",
       l.serviceNiche || "",
       l.scrapedAt ? new Date(l.scrapedAt) : "",
     ]);
     // Full URLs visible (also set as hyperlinks for convenience)
-    const urlCols = [2, 7, 8];
+    const urlCols = [2, 7];
     urlCols.forEach((colIdx) => {
       const cell = row.getCell(colIdx);
       const url = String(cell.value || "");

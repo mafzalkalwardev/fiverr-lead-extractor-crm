@@ -9,7 +9,8 @@ import {
   ScraperVerificationRequiredError,
 } from "@/scraper/types";
 import type { ScraperAdapter } from "@/scraper/types";
-import { isBrowserClosedError, pauseWithoutClosing } from "@/scraper/live/browser";
+import { getOrCreatePage, isBrowserClosedError, pauseWithoutClosing } from "@/scraper/live/browser";
+import { waitForVerificationToClear } from "@/scraper/live/verification";
 
 export interface GigProcessorState {
   gigsScanned: number;
@@ -29,6 +30,49 @@ async function bringWorkerBrowserToFront(): Promise<void> {
   } catch {
     /* ignore */
   }
+}
+
+async function waitForFiverrVerification(params: {
+  jobId: string;
+  gigUrl: string;
+  gigUrls: string[];
+  index: number;
+  state: GigProcessorState;
+  message: string;
+}): Promise<"cleared" | "stopped"> {
+  const { jobId, gigUrl, gigUrls, index, state, message } = params;
+
+  await pauseWithoutClosing(message);
+  await bringWorkerBrowserToFront();
+  await ScrapeJob.findByIdAndUpdate(jobId, {
+    status: "verification_required",
+    verificationMessage: VERIFICATION_MESSAGE,
+    currentGigLink: gigUrl,
+    gigQueue: gigUrls,
+    resumeIndex: index,
+    gigsScanned: state.gigsScanned,
+    reviewsChecked: state.reviewsChecked,
+    usLeadsFound: state.usLeads,
+    canadaLeadsFound: state.canadaLeads,
+    totalLeadsFound: state.totalLeads,
+  });
+  await appendJobLog(
+    jobId,
+    `Verification required at gig ${index + 1}: ${message}. Complete it in the opened browser; the app will continue automatically.`
+  );
+
+  const page = await getOrCreatePage();
+  const result = await waitForVerificationToClear(page, jobId);
+  if (result === "stopped") return "stopped";
+
+  await ScrapeJob.findByIdAndUpdate(jobId, {
+    status: "extracting_reviews",
+    verificationMessage: "",
+    currentGigLink: gigUrl,
+    resumeIndex: index,
+  });
+  await appendJobLog(jobId, "Extraction resumed after Fiverr verification.");
+  return "cleared";
 }
 
 export async function processGigList(
@@ -77,9 +121,10 @@ export async function processGigList(
         jobId,
         `Gig loaded: ${gig.gigUrl} | seller="${seller}" | title="${gig.gigTitle.slice(0, 90)}"`
       );
+      await appendJobLog(jobId, `Seller extracted: ${seller || "unknown"}`);
       await appendJobLog(
         jobId,
-        `Parsed ${reviewsChecked ?? reviews.length} review blocks; extracted ${reviews.length} US/Canada reviews with country/rating`
+        `Reviews extracted: parsed ${reviewsChecked ?? reviews.length} review blocks; kept ${reviews.length} US/Canada reviews with country/rating`
       );
 
       state.gigsScanned += 1;
@@ -127,49 +172,38 @@ export async function processGigList(
         resumeIndex: i + 1,
       });
       console.log(`[worker] Leads saved count for gig: ${savedForGig}`);
+      await appendJobLog(jobId, `Leads saved: ${savedForGig}`);
       await appendJobLog(
         jobId,
         `Gig complete: saved=${savedForGig}, skipped=${skippedForGig}, totalLeads=${state.totalLeads}`
       );
     } catch (err) {
       if (err instanceof ScraperVerificationRequiredError) {
-        await pauseWithoutClosing(err.message);
-        await bringWorkerBrowserToFront();
-        await ScrapeJob.findByIdAndUpdate(jobId, {
-          status: "verification_required",
-          verificationMessage: VERIFICATION_MESSAGE,
-          currentGigLink: gigUrl,
-          gigQueue: gigUrls,
-          resumeIndex: i,
-          gigsScanned: state.gigsScanned,
-          reviewsChecked: state.reviewsChecked,
-          usLeadsFound: state.usLeads,
-          canadaLeadsFound: state.canadaLeads,
-          totalLeadsFound: state.totalLeads,
-        });
-        await appendJobLog(
+        const result = await waitForFiverrVerification({
           jobId,
-          `Verification required at gig ${i + 1}: ${err.message}. Complete it in the browser, then Retry.`
-        );
-        return "verification_required";
+          gigUrl,
+          gigUrls,
+          index: i,
+          state,
+          message: err.message,
+        });
+        if (result === "stopped") return "stopped";
+        i -= 1;
+        continue;
       }
 
       if (err instanceof ScraperBlockedError) {
-        await pauseWithoutClosing(err.message);
-        await bringWorkerBrowserToFront();
-        await ScrapeJob.findByIdAndUpdate(jobId, {
-          status: "verification_required",
-          verificationMessage: VERIFICATION_MESSAGE,
-          currentGigLink: gigUrl,
-          gigQueue: gigUrls,
-          resumeIndex: i,
-          $push: { errorLog: err.message },
-        });
-        await appendJobLog(
+        const result = await waitForFiverrVerification({
           jobId,
-          `Fiverr blocked access at gig ${i + 1}: ${err.message}. Status set to verification_required.`
-        );
-        return "verification_required";
+          gigUrl,
+          gigUrls,
+          index: i,
+          state,
+          message: err.message,
+        });
+        if (result === "stopped") return "stopped";
+        i -= 1;
+        continue;
       }
 
       if (isBrowserClosedError(err)) {

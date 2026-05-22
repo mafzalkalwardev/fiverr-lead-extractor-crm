@@ -1,5 +1,9 @@
 import type { GigData, ReviewData } from "@/scraper/types";
 
+const BAD_SELLER = /^(fiverr|customer support|seller|reviews?)$/i;
+const BAD_REVIEWER = /^(fiverr|seller|\d+(\.\d+)?)$/i;
+const REVIEW_IMAGE = /delivery|attachments|t_delivery|t_smartwm|\/image\/upload\//i;
+
 function isFiverrUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -13,20 +17,25 @@ function isFiverrUrl(value: string): boolean {
 export function isValidRealLead(gig: GigData, review: ReviewData): boolean {
   if (!isFiverrUrl(gig.gigUrl)) return false;
 
-  const seller = (gig.sellerName || gig.sellerUsername || "").trim();
-  if (!seller || seller.length < 2) return false;
+  const seller = (gig.sellerUsername || gig.sellerName || "").trim();
+  if (!seller || seller.length < 2 || BAD_SELLER.test(seller)) return false;
 
   const title = (gig.gigTitle || "").trim();
   if (!title || title.length < 3) return false;
 
   const reviewer = (review.reviewerName || "").trim();
-  if (!reviewer || reviewer.length < 2) return false;
+  if (!reviewer || reviewer.length < 2 || BAD_REVIEWER.test(reviewer)) return false;
 
   const text = (review.reviewText || "").trim();
-  if (!text || text.length < 10) return false;
+  if (!text || text.length < 15) return false;
 
   if (!review.reviewerCountry?.trim()) return false;
   if (!Number.isFinite(review.reviewRating) || review.reviewRating <= 0 || review.reviewRating > 5) return false;
+
+  const img = (review.reviewedImageLink || "").trim();
+  if (!img.startsWith("http") || !REVIEW_IMAGE.test(img) || /trophy|generic_asset|\.gif/i.test(img)) {
+    return false;
+  }
 
   return true;
 }

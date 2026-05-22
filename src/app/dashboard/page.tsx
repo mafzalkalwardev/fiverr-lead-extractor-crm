@@ -11,6 +11,7 @@ import { apiFetch } from "@/lib/api";
 import type { DashboardStats, ScrapeJob } from "@/types";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { formatDate } from "@/lib/utils";
+import { CLIENT_MODE } from "@/lib/constants";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -28,21 +29,23 @@ export default function DashboardPage() {
   return (
     <DashboardLayout>
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Fiverr lead extraction overview</p>
+        <h1 className="page-title">Dashboard</h1>
+        <p className="page-subtitle">Overview of jobs and qualified US/Canada leads</p>
       </div>
 
-      <div className="mb-6 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-        Live scraping may be blocked by Fiverr verification. Use{" "}
-        <Link href="/jobs/new" className="underline font-medium text-amber-200">
-          Manual URL
-        </Link>{" "}
-        or{" "}
-        <Link href="/jobs/new" className="underline font-medium text-amber-200">
-          HTML Import
-        </Link>{" "}
-        mode for reliable extraction. We never bypass CAPTCHA.
-      </div>
+      {!CLIENT_MODE && (
+        <div className="mb-6 rounded-lg border border-border/80 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+          For reliable runs when Fiverr shows verification, use{" "}
+          <Link href="/jobs/new" className="font-medium text-primary hover:underline">
+            Manual URL
+          </Link>{" "}
+          or{" "}
+          <Link href="/jobs/new" className="font-medium text-primary hover:underline">
+            HTML Import
+          </Link>{" "}
+          on the Create Job screen.
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 mb-8">
         <StatsCard title="Total Jobs" value={stats?.totalJobs ?? 0} icon={Briefcase} />

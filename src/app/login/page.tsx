@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/providers/toast-provider";
 import { BrandLogo, BrandFooter } from "@/components/branding";
 import { APP_NAME } from "@/lib/constants";
+import { Shield } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -28,13 +29,13 @@ export default function LoginPage() {
       });
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
-      toast({ title: "Welcome", description: "Signed in successfully." });
+      toast({ title: "Welcome back", description: "Signed in successfully." });
       const user = data.user as { role?: string };
       router.push(user.role === "admin" ? "/admin" : "/dashboard");
     } catch (err) {
       toast({
-        title: "Login failed",
-        description: err instanceof Error ? err.message : "Unknown error",
+        title: "Sign in failed",
+        description: err instanceof Error ? err.message : "Check your email and password.",
       });
     } finally {
       setLoading(false);
@@ -42,24 +43,41 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center space-y-4">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background p-6">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-40"
+        aria-hidden
+        style={{
+          background:
+            "radial-gradient(ellipse 80% 50% at 50% -20%, hsl(142 76% 45% / 0.15), transparent), radial-gradient(ellipse 60% 40% at 100% 100%, hsl(217 33% 25% / 0.4), transparent)",
+        }}
+      />
+      <Card className="relative w-full max-w-md border-border/80 bg-card/95 shadow-2xl backdrop-blur-sm">
+        <CardHeader className="space-y-6 pb-2 text-center">
           <div className="flex justify-center">
             <BrandLogo />
           </div>
-          <CardDescription>Sign in to {APP_NAME}</CardDescription>
+          <div className="space-y-1">
+            <CardDescription className="text-base text-muted-foreground">
+              Sign in to {APP_NAME}
+            </CardDescription>
+            <p className="text-xs text-muted-foreground/80">
+              US &amp; Canada lead extraction · secure workspace
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Work email</Label>
               <Input
                 id="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@ftsolutions.local"
+                placeholder="you@company.com"
+                className="h-11"
                 required
               />
             </div>
@@ -68,23 +86,25 @@ export default function LoginPage() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="h-11"
                 required
               />
             </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
+            <Button type="submit" className="h-11 w-full text-base" disabled={loading}>
+              {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
-          <div className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
-            <p className="font-medium text-foreground">Default admin (run npm run seed:admin first):</p>
-            <p>Email: admin@ftsolutions.local</p>
-            <p>Password: Admin@FT2024</p>
-          </div>
+          <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+            <Shield className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            Credentials are issued by your administrator only.
+          </p>
         </CardContent>
       </Card>
-      <div className="mt-6">
+      <div className="relative mt-8">
         <BrandFooter />
       </div>
     </div>

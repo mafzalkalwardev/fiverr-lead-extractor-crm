@@ -111,11 +111,6 @@ function LeadsContent() {
             header: "Reviewed Image Link",
             render: (r) => <UrlCell url={String(r.reviewedImageLink || "")} />,
           },
-          {
-            key: "mainGigImage",
-            header: "Main Gig Image",
-            render: (r) => <UrlCell url={String(r.mainGigImage || "")} />,
-          },
           { key: "serviceNiche", header: "Service/Niche" },
         ]}
         emptyMessage="No leads yet — run a job with US/Canada filter"

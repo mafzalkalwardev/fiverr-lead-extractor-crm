@@ -13,6 +13,10 @@ export async function isVerificationRequired(page: Page): Promise<boolean> {
     /press\s*&\s*hold/i.test(body) ||
     /press and hold/i.test(body) ||
     /human verification/i.test(body) ||
+    /verify you are human/i.test(body) ||
+    /checking your browser/i.test(body) ||
+    /perimeterx/i.test(body) ||
+    /captcha/i.test(body) ||
     /complete the task/i.test(body) ||
     /pxcr\d+/i.test(body) ||
     /#px-captcha/i.test(body)
@@ -37,7 +41,7 @@ export async function assertPageAccessible(page: Page): Promise<void> {
   }
   if (await isHardBlocked(page)) {
     throw new ScraperVerificationRequiredError(
-      "Fiverr access denied or sign-in verification required. Complete verification in the browser window, then Retry."
+      "Fiverr access denied or sign-in verification required. Complete verification in the opened browser window."
     );
   }
 }

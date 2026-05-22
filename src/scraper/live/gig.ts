@@ -39,8 +39,8 @@ const IMAGE_SELECTORS = [
 const BAD_SELLER_TEXT =
   /^(contact me|message|order now|continue|search|fiverr|profile|seller|reviews?|about|english|from|view profile)$/i;
 
-function cleanText(value: string | null | undefined): string {
-  return (value || "").replace(/\s+/g, " ").trim();
+function cleanText(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function cleanTitle(value: string): string {
@@ -64,6 +64,8 @@ function isLikelySellerName(value: string, gigTitle: string): boolean {
   const text = cleanText(value).replace(/^@/, "");
   if (text.length < 2 || text.length > 80) return false;
   if (BAD_SELLER_TEXT.test(text)) return false;
+  if (/\b(starting at|package|basic|standard|premium)\b/i.test(text)) return false;
+  if (/\b(?:pkr|usd|eur|gbp|cad|aud|\$|€|£)\b/i.test(text)) return false;
   if (gigTitle && text.toLowerCase() === gigTitle.toLowerCase()) return false;
   if (/\b(order|checkout|login|join|search|category|review|rating)\b/i.test(text)) return false;
   return true;

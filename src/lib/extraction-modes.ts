@@ -11,7 +11,7 @@ export const EXTRACTION_MODE_LABELS: Record<ExtractionMode, string> = {
 export const CLIENT_EXTRACTION_MODES = ["live", "manual_urls"] as const;
 
 export const VERIFICATION_MESSAGE =
-  "Complete Fiverr verification in opened browser. Do NOT close browser window. When verification is complete, click Retry.";
+  "Complete Fiverr verification in the opened browser. The app will continue automatically. Do NOT close browser window.";
 
 export function parseGigUrlsFromText(text: string): string[] {
   const urls = text.match(/https?:\/\/[^\s]+/g) || [];

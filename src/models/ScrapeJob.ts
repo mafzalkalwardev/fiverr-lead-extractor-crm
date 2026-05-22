@@ -62,7 +62,7 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     maxGigs: { type: Number, default: 10 },
     maxReviewsPerGig: { type: Number, default: 20 },
     maxTotalLeads: { type: Number, default: 100 },
-    delaySeconds: { type: Number, default: 3 },
+    delaySeconds: { type: Number, default: 2 },
     status: {
       type: String,
       enum: [

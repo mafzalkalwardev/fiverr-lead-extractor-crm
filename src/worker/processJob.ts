@@ -170,7 +170,7 @@ export async function processScrapeJob(jobId: string): Promise<void> {
         if (gigUrls.length === 0) {
           await setVerificationRequired(
             jobId,
-            "No gig URLs discovered. Complete Fiverr verification in Chrome, then Retry. Or use Paste Gig Links mode."
+            "No gig URLs discovered. Complete Fiverr verification in Chrome; Retry remains available as a manual backup. Or use Paste Gig Links mode."
           );
           finalStatus = "verification_required";
           return;

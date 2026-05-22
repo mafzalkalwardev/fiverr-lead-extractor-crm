@@ -31,9 +31,14 @@ export default function JobMonitorPage() {
 
   useEffect(() => {
     fetchJob();
-    const t = setInterval(fetchJob, 3000);
-    return () => clearInterval(t);
   }, [fetchJob]);
+
+  useEffect(() => {
+    const terminal = ["completed", "failed", "stopped", "blocked"];
+    const ms = job && terminal.includes(job.status) ? 12000 : 4000;
+    const t = setInterval(fetchJob, ms);
+    return () => clearInterval(t);
+  }, [fetchJob, job?.status]);
 
   const stopJob = async () => {
     try {
@@ -50,7 +55,7 @@ export default function JobMonitorPage() {
       await apiFetch(`/api/jobs/${id}/retry`, { method: "POST" });
       toast({
         title: "Retry queued",
-        description: "Complete verification in the worker browser, then processing continues.",
+        description: "Retry is a manual backup; the worker will still use the existing browser session.",
       });
       fetchJob();
     } catch (err) {
@@ -116,7 +121,7 @@ export default function JobMonitorPage() {
             {job.status === "discovering_gigs" && "Finding Fiverr gig URLs"}
             {job.status === "extracting_reviews" && "Opening gigs and extracting reviews"}
             {job.status === "verification_required" &&
-              "Complete Fiverr verification in opened browser. Do NOT close browser window."}
+              "Complete Fiverr verification in the opened browser. The app will continue automatically."}
             {job.status === "blocked" && "Blocked by Fiverr"}
             {job.status === "failed" && "Failed — see errors"}
             {job.status === "completed" && "Completed"}
@@ -152,12 +157,12 @@ export default function JobMonitorPage() {
         <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/15 px-4 py-4 text-sm">
           <p className="font-medium text-amber-200">
             {job.verificationMessage ||
-              "Complete Fiverr verification in opened browser. Do NOT close browser window."}
+              "Complete Fiverr verification in the opened browser. The app will continue automatically."}
           </p>
           <ol className="text-xs text-muted-foreground mt-2 list-decimal list-inside space-y-1">
             <li>Look for the Chrome window opened by FT Solutions (not your normal browser).</li>
             <li>Complete any Fiverr “Press & Hold” or sign-in check there.</li>
-            <li>Leave that window open and click <strong>Retry</strong> below.</li>
+            <li>Leave that window open; Retry is only a manual backup.</li>
           </ol>
           <p className="text-xs text-muted-foreground mt-2">
             Progress saved — gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.

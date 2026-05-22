@@ -54,7 +54,7 @@ export function Sidebar() {
   const items = role === "admin" ? [...userNav, ...adminNav] : userNav;
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-gradient-to-b from-card to-background shadow-xl">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-border/80 bg-card/50 backdrop-blur-md shadow-xl">
       <div className="border-b border-border px-6 py-4">
         <BrandLogo />
       </div>

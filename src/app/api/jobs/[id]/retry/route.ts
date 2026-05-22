@@ -5,7 +5,7 @@ import { enqueueScrapeJob } from "@/queue/scrapeQueue";
 import { appendJobLog } from "@/lib/jobLog";
 import ScrapeJob from "@/models/ScrapeJob";
 
-/** Resume job after user completed Fiverr verification — keeps progress */
+/** Manual backup resume after Fiverr verification; keeps saved progress. */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -35,7 +35,7 @@ export async function POST(
     });
     await appendJobLog(
       id,
-      "Retry requested after verification. Worker will continue using the existing persistent browser session."
+      "Manual retry requested. Worker will continue using the existing persistent browser session."
     );
 
     await enqueueScrapeJob(id);

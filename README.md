@@ -4,7 +4,7 @@
 
 **LIVE-ONLY** Fiverr lead extraction: real search → real gigs → real reviews → US/Canada filter → Excel export.
 
-> Demo/mock/fake data is **disabled**. `SCRAPER_MODE` must be `playwright`. If extraction fails, nothing is fabricated.
+> `SCRAPER_MODE` must be `playwright`. If extraction fails, nothing is fabricated.
 
 ## Live workflow
 
@@ -43,12 +43,6 @@ PLAYWRIGHT_HEADLESS=false
 
 Login: `admin@ftsolutions.local` / `Admin@FT2024`
 
-## Purge old fake/demo leads
-
-```powershell
-npm run purge:leads
-```
-
 ## Excel export
 
 - Sheet: **Fiverr Leads**
@@ -67,18 +61,17 @@ npm run purge:leads
 | `npm run build` | Production build |
 | `npm run electron:dev` | Dev + worker + Electron window |
 | `npm run electron:build` | Build + Electron |
-| `npm run purge:leads` | Remove fake/demo rows from MongoDB |
 
 ## Fiverr CAPTCHA / PerimeterX
 
-Fiverr may show **"It needs a human touch"** for automated browsers. The app **never fakes data** when this happens — the job is marked **blocked**.
+Fiverr may show **"It needs a human touch"** for automated browsers. When this happens, the job is marked **blocked**.
 
 **Fix (one-time):**
 
 1. Set `PLAYWRIGHT_HEADLESS=false` in `.env`
 2. Run `npm run worker` — a Chromium window opens
 3. Start a job; when Fiverr shows the challenge, complete it manually in that window
-4. Cookies are saved in `.playwright-fiverr-profile/` for later runs
+4. Cookies are saved in `browser-profile/` for later runs
 
 Optional: `PLAYWRIGHT_CHANNEL=chrome` to use installed Google Chrome.
 

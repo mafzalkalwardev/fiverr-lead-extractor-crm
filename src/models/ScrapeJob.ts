@@ -43,7 +43,6 @@ export interface IScrapeJob extends Document {
   discoverySource: DiscoverySource;
   urlsDiscovered: number;
   activityLog: string[];
-  isLegacyDemo: boolean;
   keyword?: string;
   category?: string;
   createdAt: Date;
@@ -106,7 +105,6 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     discoverySource: { type: String, default: "" },
     urlsDiscovered: { type: Number, default: 0 },
     activityLog: { type: [String], default: [] },
-    isLegacyDemo: { type: Boolean, default: false },
     keyword: { type: String, required: false },
     category: { type: String, required: false },
   },

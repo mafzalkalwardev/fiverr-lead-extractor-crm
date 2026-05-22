@@ -1,5 +1,5 @@
 /**
- * Smoke test: real Fiverr search (no fake data).
+ * Smoke test: real Fiverr search.
  * Run: npx tsx scripts/test-live-scraper.ts
  */
 import "@/lib/load-env";
@@ -29,14 +29,6 @@ async function main() {
   reviews.slice(0, 3).forEach((r, i) => {
     console.log(`  ${i + 1}. ${r.reviewerName} | ${r.reviewerCountry} | ${r.reviewText.slice(0, 60)}...`);
   });
-
-  const hasDemo = [gig.gigUrl, gig.sellerName, ...reviews.map((r) => r.reviewerName)].some(
-    (s) => /demo|fake|\[DEMO\]/i.test(s || "")
-  );
-  if (hasDemo) {
-    console.error("FAIL: Demo/fake patterns detected");
-    process.exit(1);
-  }
 
   await scraper.close();
   console.log("\nPASS: Live scraper returned real Fiverr data");

@@ -54,16 +54,6 @@ If login fails (invalid token): clear site data / use incognito once, or re-logi
 1. Save gig pages as `.html` (Ctrl+S).
 2. **HTML Import** → upload files.
 
----
-
-## Clean fake data
-```powershell
-npm run mark:demo-jobs
-npm run purge:leads
-```
-
----
-
 ## .env (required)
 ```
 SCRAPER_MODE=playwright

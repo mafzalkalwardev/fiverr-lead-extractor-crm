@@ -1,6 +1,5 @@
 import ScrapeJob from "@/models/ScrapeJob";
 import Lead from "@/models/Lead";
-import { isLegacyDemoJob } from "@/lib/extraction-modes";
 import type { Types } from "mongoose";
 
 export interface DashboardStats {
@@ -17,16 +16,10 @@ export async function getDashboardStats(
   userId: Types.ObjectId,
   isAdmin = false
 ): Promise<DashboardStats> {
-  const jobQuery = isAdmin ? { isLegacyDemo: { $ne: true } } : { userId, isLegacyDemo: { $ne: true } };
+  const jobQuery = isAdmin ? {} : { userId };
   const jobs = await ScrapeJob.find(jobQuery).lean();
 
-  const leadQuery = isAdmin
-    ? { reviewerName: { $not: /\[DEMO\]/i }, gigLink: { $not: /demo_seller|demo\.ftsolutions/i } }
-    : {
-        userId,
-        reviewerName: { $not: /\[DEMO\]/i },
-        gigLink: { $not: /demo_seller|demo\.ftsolutions/i },
-      };
+  const leadQuery = isAdmin ? {} : { userId };
   const [totalLeads, usLeads, canadaLeads] = await Promise.all([
     Lead.countDocuments(leadQuery),
     Lead.countDocuments({ ...leadQuery, country: "United States" }),
@@ -71,12 +64,6 @@ export function normalizeJob(doc: Record<string, unknown>) {
     discoverySource: (doc.discoverySource as string) || "",
     urlsDiscovered: (doc.urlsDiscovered as number) ?? 0,
     activityLog: (doc.activityLog as string[]) || [],
-    isLegacyDemo:
-      (doc.isLegacyDemo as boolean) ||
-      isLegacyDemoJob({
-        niche: doc.niche as string,
-        extractionMode: doc.extractionMode as string,
-      }),
     errors,
     jobErrors: errors,
   };

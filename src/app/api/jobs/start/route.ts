@@ -31,7 +31,7 @@ async function saveHtmlFiles(
     await fs.writeFile(storedPath, f.content, "utf-8");
     saved.push({
       filename: f.name,
-      gigUrl: f.gigUrl || "",
+      gigUrl: normalizeFiverrUrl(f.gigUrl) || "",
       storedPath,
     });
   }
@@ -105,9 +105,10 @@ export async function POST(req: NextRequest) {
     let manualGigUrls: string[] = [];
     if (extractionMode === "manual_urls") {
       const raw = String(body.manualGigUrls || "");
-      manualGigUrls = parseGigUrlsFromText(raw).map(
-        (u) => normalizeFiverrUrl(u) || u
-      );
+      manualGigUrls = parseGigUrlsFromText(raw).flatMap((u) => {
+        const normalized = normalizeFiverrUrl(u);
+        return normalized ? [normalized] : [];
+      });
       if (manualGigUrls.length === 0) {
         return NextResponse.json(
           { error: "Paste at least one valid Fiverr gig URL" },
@@ -135,7 +136,6 @@ export async function POST(req: NextRequest) {
       manualGigUrls,
       gigQueue: manualGigUrls,
       errorLog: [],
-      isLegacyDemo: false,
     });
 
     const jobId = job._id.toString();

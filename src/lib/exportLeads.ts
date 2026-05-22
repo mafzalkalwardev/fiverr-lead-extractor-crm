@@ -40,13 +40,6 @@ export async function buildLeadsExcel(
   if (filter.userId) query.userId = filter.userId;
 
   let leads = await Lead.find(query).sort({ scrapedAt: -1 }).lean();
-  leads = leads.filter(
-    (l) =>
-      !/\[DEMO\]/i.test(l.reviewerName || "") &&
-      !/\[DEMO\]/i.test(l.sellerName || "") &&
-      !/demo\.ftsolutions\.local/i.test(l.gigLink || "") &&
-      !/demo_seller/i.test(l.gigLink || "")
-  );
   leads = dedupeLeadsForExport(leads);
 
   const workbook = new ExcelJS.Workbook();

@@ -2,10 +2,7 @@ import { newLivePage } from "../live/browser";
 import { runSearch } from "../live/search";
 import { discoverGigsViaHttpSearch } from "./httpSearch";
 import { discoverGigsViaSearx } from "./searx";
-import {
-  ScraperBlockedError,
-  ScraperVerificationRequiredError,
-} from "../types";
+import { ScraperVerificationRequiredError } from "../types";
 
 export type DiscoverySource = "fiverr_search" | "search_engine" | "manual" | "cached_queue";
 
@@ -36,11 +33,7 @@ export async function discoverGigUrls(
     if (err instanceof ScraperVerificationRequiredError) {
       throw err;
     }
-    if (!(err instanceof ScraperBlockedError)) {
-      console.warn("[discovery] Fiverr search error:", err);
-    }
-  } finally {
-    await fiverrPage.close().catch(() => {});
+    console.warn("[discovery] Fiverr search error:", err);
   }
 
   // 2) SearX JSON fallback

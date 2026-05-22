@@ -15,14 +15,16 @@ export async function discoverGigsViaSearchEngine(
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await sleep(2500);
 
-  const hrefs = await page.evaluate(() => {
-    const links: string[] = [];
-    document.querySelectorAll("a.result__a, a[href]").forEach((a) => {
-      const href = (a as HTMLAnchorElement).href || a.getAttribute("href") || "";
-      if (href) links.push(href);
-    });
-    return links;
-  });
+  const hrefs: string[] = [];
+  const selectors = ["a.result__a", "a[href]"];
+  for (const selector of selectors) {
+    const links = page.locator(selector);
+    const count = Math.min(await links.count().catch(() => 0), 250);
+    for (let i = 0; i < count; i++) {
+      const href = await links.nth(i).getAttribute("href").catch(() => null);
+      if (href) hrefs.push(href);
+    }
+  }
 
   const seen = new Set<string>();
   const results: string[] = [];

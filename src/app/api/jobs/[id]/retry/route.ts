@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, authErrorResponse } from "@/lib/auth";
 import { enqueueScrapeJob } from "@/queue/scrapeQueue";
+import { appendJobLog } from "@/lib/jobLog";
 import ScrapeJob from "@/models/ScrapeJob";
 
 /** Resume job after user completed Fiverr verification — keeps progress */
@@ -32,6 +33,10 @@ export async function POST(
       status: "pending",
       verificationMessage: "",
     });
+    await appendJobLog(
+      id,
+      "Retry requested after verification. Worker will continue using the existing persistent browser session."
+    );
 
     await enqueueScrapeJob(id);
     console.log("[POST /api/jobs/retry] re-queued job:", id, "resumeIndex:", job.resumeIndex);

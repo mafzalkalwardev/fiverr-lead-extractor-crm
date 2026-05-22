@@ -38,7 +38,6 @@ export interface ScrapeJob {
   discoverySource?: string;
   urlsDiscovered?: number;
   activityLog?: string[];
-  isLegacyDemo?: boolean;
   createdAt: string;
   updatedAt: string;
   userId?: string;

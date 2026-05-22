@@ -15,9 +15,7 @@
     "electron": "electron .",
     "electron:dev": "concurrently \"npm run dev\" \"npm run worker\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "npm run build && electron .",
-    "purge:leads": "tsx scripts/purge-fake-leads.ts",
     "migrate:jobs": "tsx scripts/migrate-jobs-schema.ts",
-    "mark:demo-jobs": "tsx scripts/mark-legacy-demo-jobs.ts",
     "setup:browser": "tsx scripts/setup-browser.ts",
     "test:manual": "tsx scripts/run-manual-job.ts",
     "test:e2e": "tsx scripts/test-e2e.ts"

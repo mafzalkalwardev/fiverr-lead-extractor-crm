@@ -6,7 +6,7 @@ let liveInstance: LiveFiverrScraper | null = null;
 
 /**
  * LIVE-ONLY scraper factory.
- * SCRAPER_MODE must be "playwright". Demo/mock scrapers are disabled.
+ * SCRAPER_MODE must be "playwright".
  */
 export function createScraper(): ScraperAdapter {
   assertLiveScraperMode();

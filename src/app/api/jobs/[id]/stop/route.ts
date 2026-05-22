@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, authErrorResponse } from "@/lib/auth";
 import { logActivity } from "@/lib/activityLog";
+import { appendJobLog } from "@/lib/jobLog";
+import { createRedisConnection } from "@/queue/connection";
 import ScrapeJob from "@/models/ScrapeJob";
 
 export async function POST(
@@ -26,6 +28,11 @@ export async function POST(
     }
 
     await logActivity("job_stopped", `Job ${id} stopped`, user._id);
+    await appendJobLog(id, "Manual stop requested. Worker will close the persistent browser session.");
+
+    const redis = createRedisConnection();
+    await redis.set("browser:shutdown", `manual stop:${id}`, "EX", 60).finally(() => redis.quit());
+
     return NextResponse.json({ job });
   } catch (err) {
     if (err instanceof Error && err.message === "Unauthorized") return authErrorResponse();

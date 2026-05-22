@@ -9,7 +9,7 @@ import {
   ScraperVerificationRequiredError,
 } from "@/scraper/types";
 import type { ScraperAdapter } from "@/scraper/types";
-import { isBrowserClosedError, resetBrowser } from "@/scraper/live/browser";
+import { isBrowserClosedError, pauseWithoutClosing } from "@/scraper/live/browser";
 
 export interface GigProcessorState {
   gigsScanned: number;
@@ -20,6 +20,17 @@ export interface GigProcessorState {
   failedGigs: number;
 }
 
+async function bringWorkerBrowserToFront(): Promise<void> {
+  try {
+    const { getBrowserContext } = await import("@/scraper/live/browser");
+    const ctx = await getBrowserContext();
+    const pages = ctx.pages();
+    if (pages[0]) await pages[0].bringToFront().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function processGigList(
   job: IScrapeJob,
   jobId: string,
@@ -28,7 +39,7 @@ export async function processGigList(
   scraper: ScraperAdapter,
   niche: string,
   state: GigProcessorState
-): Promise<"completed" | "verification_required" | "blocked" | "stopped"> {
+): Promise<"completed" | "verification_required" | "stopped"> {
   const totalSteps = Math.max(gigUrls.length, 1);
 
   for (let i = startIndex; i < gigUrls.length; i++) {
@@ -46,34 +57,64 @@ export async function processGigList(
       gigQueue: gigUrls,
       progressPercent: Math.round((i / totalSteps) * 100),
     });
-    await appendJobLog(jobId, `Opening gig ${i + 1}/${gigUrls.length}`);
+    await appendJobLog(jobId, `Opening real Fiverr gig ${i + 1}/${gigUrls.length}: ${gigUrl}`);
 
     try {
+      await appendJobLog(jobId, `Waiting ${job.delaySeconds}s before navigation`);
       await sleep(job.delaySeconds * 1000);
-      const { gig, reviews } = await scraper.processGig(gigUrl, job.maxReviewsPerGig);
+
+      const { gig, reviews, reviewsChecked } = await scraper.processGig(
+        gigUrl,
+        job.maxReviewsPerGig
+      );
+      const seller = gig.sellerName || gig.sellerUsername || "";
 
       await ScrapeJob.findByIdAndUpdate(jobId, {
-        currentSeller: gig.sellerName || gig.sellerUsername || "",
+        currentGigLink: gig.gigUrl,
+        currentSeller: seller,
       });
       await appendJobLog(
         jobId,
-        `Seller: ${gig.sellerName || gig.sellerUsername} · ${reviews.length} reviews`
+        `Gig loaded: ${gig.gigUrl} | seller="${seller}" | title="${gig.gigTitle.slice(0, 90)}"`
+      );
+      await appendJobLog(
+        jobId,
+        `Parsed ${reviewsChecked ?? reviews.length} review blocks; extracted ${reviews.length} US/Canada reviews with country/rating`
       );
 
       state.gigsScanned += 1;
-      state.reviewsChecked += reviews.length;
+      state.reviewsChecked += reviewsChecked ?? reviews.length;
 
-      for (const review of reviews) {
+      let savedForGig = 0;
+      let skippedForGig = 0;
+
+      for (let reviewIndex = 0; reviewIndex < reviews.length; reviewIndex++) {
+        const review = reviews[reviewIndex];
         if (state.totalLeads >= job.maxTotalLeads) break;
-        const { saved, country } = await saveLeadIfQualified(
+
+        await appendJobLog(
+          jobId,
+          `Review ${reviewIndex + 1}/${reviews.length}: reviewer="${review.reviewerName}" country="${review.reviewerCountry}" rating=${review.reviewRating}`
+        );
+
+        const { saved, country, reason } = await saveLeadIfQualified(
           { jobId: job._id, userId: job.userId, niche, gig, review },
           job.targetCountries
         );
+
         if (saved) {
           state.totalLeads += 1;
+          savedForGig += 1;
           const bucket = countLeadByCountry(country);
           if (bucket === "us") state.usLeads += 1;
           if (bucket === "canada") state.canadaLeads += 1;
+          await appendJobLog(jobId, `Saved lead: ${review.reviewerName} (${country})`);
+        } else {
+          skippedForGig += 1;
+          await appendJobLog(
+            jobId,
+            `Skipped review: ${review.reviewerName || "missing reviewer"} (${country || "missing country"}) reason=${reason}`
+          );
         }
       }
 
@@ -85,16 +126,15 @@ export async function processGigList(
         totalLeadsFound: state.totalLeads,
         resumeIndex: i + 1,
       });
+      console.log(`[worker] Leads saved count for gig: ${savedForGig}`);
+      await appendJobLog(
+        jobId,
+        `Gig complete: saved=${savedForGig}, skipped=${skippedForGig}, totalLeads=${state.totalLeads}`
+      );
     } catch (err) {
       if (err instanceof ScraperVerificationRequiredError) {
-        try {
-          const { getBrowserContext } = await import("@/scraper/live/browser");
-          const ctx = await getBrowserContext();
-          const pages = ctx.pages();
-          if (pages[0]) await pages[0].bringToFront().catch(() => {});
-        } catch {
-          /* ignore */
-        }
+        await pauseWithoutClosing(err.message);
+        await bringWorkerBrowserToFront();
         await ScrapeJob.findByIdAndUpdate(jobId, {
           status: "verification_required",
           verificationMessage: VERIFICATION_MESSAGE,
@@ -107,19 +147,32 @@ export async function processGigList(
           canadaLeadsFound: state.canadaLeads,
           totalLeadsFound: state.totalLeads,
         });
-        await appendJobLog(jobId, `Verification required at gig ${i + 1} — use Retry after solving`);
+        await appendJobLog(
+          jobId,
+          `Verification required at gig ${i + 1}: ${err.message}. Complete it in the browser, then Retry.`
+        );
         return "verification_required";
       }
+
       if (err instanceof ScraperBlockedError) {
+        await pauseWithoutClosing(err.message);
+        await bringWorkerBrowserToFront();
         await ScrapeJob.findByIdAndUpdate(jobId, {
-          status: "blocked",
+          status: "verification_required",
+          verificationMessage: VERIFICATION_MESSAGE,
           currentGigLink: gigUrl,
+          gigQueue: gigUrls,
+          resumeIndex: i,
           $push: { errorLog: err.message },
         });
-        return "blocked";
+        await appendJobLog(
+          jobId,
+          `Fiverr blocked access at gig ${i + 1}: ${err.message}. Status set to verification_required.`
+        );
+        return "verification_required";
       }
+
       if (isBrowserClosedError(err)) {
-        await resetBrowser();
         await ScrapeJob.findByIdAndUpdate(jobId, {
           status: "verification_required",
           verificationMessage: VERIFICATION_MESSAGE,
@@ -129,16 +182,21 @@ export async function processGigList(
         });
         await appendJobLog(
           jobId,
-          "Browser was closed — a new window will open on Retry. Do not close the Chrome window during jobs."
+          "Browser/session was closed. Retry will reconnect to the same persistent profile, but do not close Chrome during verification."
         );
         return "verification_required";
       }
+
       state.failedGigs += 1;
       const msg = err instanceof Error ? err.message : String(err);
       await ScrapeJob.findByIdAndUpdate(jobId, {
         failedGigs: state.failedGigs,
         $push: { errorLog: `${gigUrl}: ${msg}` },
       });
+      await appendJobLog(
+        jobId,
+        `${/selectors failed/i.test(msg) ? "selectors failed" : "Gig failed"}: ${gigUrl} | ${msg}`
+      );
     }
   }
 

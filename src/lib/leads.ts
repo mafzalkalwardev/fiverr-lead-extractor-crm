@@ -40,17 +40,27 @@ export interface LeadInput {
   review: ReviewData;
 }
 
+export type SaveLeadResult = {
+  saved: boolean;
+  country: string;
+  reason: "saved" | "missing_country" | "non_target_country" | "invalid_real_lead" | "duplicate";
+};
+
 export async function saveLeadIfQualified(
   input: LeadInput,
   targetCountries: string[]
-): Promise<{ saved: boolean; country: string }> {
+): Promise<SaveLeadResult> {
   const country = normalizeCountry(input.review.reviewerCountry);
-  if (!country || !isTargetCountry(country, targetCountries)) {
-    return { saved: false, country };
+  if (!country) {
+    return { saved: false, country, reason: "missing_country" };
+  }
+
+  if (!isTargetCountry(country, targetCountries)) {
+    return { saved: false, country, reason: "non_target_country" };
   }
 
   if (!isValidRealLead(input.gig, input.review)) {
-    return { saved: false, country };
+    return { saved: false, country, reason: "invalid_real_lead" };
   }
 
   const sellerName = (input.gig.sellerName || input.gig.sellerUsername || "").trim();
@@ -78,10 +88,10 @@ export async function saveLeadIfQualified(
       scrapedAt: new Date(),
       dedupeKey,
     });
-    return { saved: true, country };
+    return { saved: true, country, reason: "saved" };
   } catch (err) {
     if ((err as { code?: number }).code === 11000) {
-      return { saved: false, country };
+      return { saved: false, country, reason: "duplicate" };
     }
     throw err;
   }

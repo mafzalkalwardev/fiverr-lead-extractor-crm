@@ -29,12 +29,7 @@ export default function JobsListPage() {
           <Link key={job._id} href={`/jobs/${job._id}`}>
             <Card className="hover:border-primary/50 transition-colors cursor-pointer">
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-lg">
-                  {job.niche}
-                  {job.isLegacyDemo && (
-                    <span className="ml-2 text-xs font-normal text-amber-400">DEMO</span>
-                  )}
-                </CardTitle>
+                <CardTitle className="text-lg">{job.niche}</CardTitle>
                 <JobStatusBadge status={job.status} />
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">

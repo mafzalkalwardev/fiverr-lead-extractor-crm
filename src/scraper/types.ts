@@ -23,7 +23,7 @@ export interface ReviewData {
   reviewerCountry: string;
   reviewRating: number;
   reviewText: string;
-  reviewDate: Date;
+  reviewDate?: Date;
   reviewedImageLink: string;
   sellerResponse?: string;
 }
@@ -47,6 +47,7 @@ export class ScraperVerificationRequiredError extends Error {
 export interface GigExtractionResult {
   gig: GigData;
   reviews: ReviewData[];
+  reviewsChecked?: number;
 }
 
 export interface ScraperAdapter {

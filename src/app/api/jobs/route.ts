@@ -10,11 +10,9 @@ export async function GET(req: NextRequest) {
     const user = await getAuthUser(req);
     await connectDB();
 
-    const showDemo = req.nextUrl.searchParams.get("includeDemo") === "true";
     const baseQuery = user.role === "admin" ? {} : { userId: user._id };
-    const query = showDemo ? baseQuery : { ...baseQuery, isLegacyDemo: { $ne: true } };
 
-    const rawJobs = await ScrapeJob.find(query).sort({ createdAt: -1 }).lean();
+    const rawJobs = await ScrapeJob.find(baseQuery).sort({ createdAt: -1 }).lean();
     const jobs = rawJobs.map((j) => normalizeJob(j as Record<string, unknown>));
     const stats = await getDashboardStats(user._id, user.role === "admin");
 

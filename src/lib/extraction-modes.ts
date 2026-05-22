@@ -11,7 +11,7 @@ export const EXTRACTION_MODE_LABELS: Record<ExtractionMode, string> = {
 export const CLIENT_EXTRACTION_MODES = ["live", "manual_urls"] as const;
 
 export const VERIFICATION_MESSAGE =
-  "Complete Fiverr verification in the Chrome window that opens automatically, then click Retry. Keep that window open while jobs run.";
+  "Complete Fiverr verification in opened browser. Do NOT close browser window. When verification is complete, click Retry.";
 
 export function parseGigUrlsFromText(text: string): string[] {
   const urls = text.match(/https?:\/\/[^\s]+/g) || [];
@@ -19,14 +19,4 @@ export function parseGigUrlsFromText(text: string): string[] {
   return urls
     .map((u) => u.replace(/[),.;]+$/, "").trim())
     .filter((u) => u.includes("fiverr.com") && !seen.has(u) && seen.add(u));
-}
-
-export function isLegacyDemoJob(job: {
-  niche?: string;
-  extractionMode?: string;
-  isLegacyDemo?: boolean;
-}): boolean {
-  if (job.isLegacyDemo) return true;
-  if (job.extractionMode === "demo") return true;
-  return /\[DEMO\]/i.test(job.niche || "");
 }

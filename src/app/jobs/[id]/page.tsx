@@ -110,16 +110,13 @@ export default function JobMonitorPage() {
           <p className="text-muted-foreground">
             {job.niche} · {EXTRACTION_MODE_LABELS[job.extractionMode] || job.extractionMode}
           </p>
-          {job.isLegacyDemo && (
-            <p className="mt-1 text-xs text-amber-400 font-medium">LEGACY DEMO JOB — not real data</p>
-          )}
           <p className="text-xs text-muted-foreground mt-1">
             {job.status === "pending" && "Waiting in queue for worker"}
             {job.status === "running" && "Scraper active"}
             {job.status === "discovering_gigs" && "Finding Fiverr gig URLs"}
             {job.status === "extracting_reviews" && "Opening gigs and extracting reviews"}
             {job.status === "verification_required" &&
-              "Paused — complete Fiverr verification, then Retry"}
+              "Complete Fiverr verification in opened browser. Do NOT close browser window."}
             {job.status === "blocked" && "Blocked by Fiverr"}
             {job.status === "failed" && "Failed — see errors"}
             {job.status === "completed" && "Completed"}
@@ -155,7 +152,7 @@ export default function JobMonitorPage() {
         <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/15 px-4 py-4 text-sm">
           <p className="font-medium text-amber-200">
             {job.verificationMessage ||
-              "Action needed in the Chrome window that opens with this app."}
+              "Complete Fiverr verification in opened browser. Do NOT close browser window."}
           </p>
           <ol className="text-xs text-muted-foreground mt-2 list-decimal list-inside space-y-1">
             <li>Look for the Chrome window opened by FT Solutions (not your normal browser).</li>

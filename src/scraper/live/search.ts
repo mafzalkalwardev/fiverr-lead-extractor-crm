@@ -21,30 +21,32 @@ export async function collectGigCards(page: Page, maxGigs: number): Promise<GigS
     await sleep(600);
   }
 
-  const hrefs = await page.evaluate(() => {
-    const selectors = [
-      '[class*="gig-card"] a[href]',
-      '[class*="GigCard"] a[href]',
-      'article a[href*="/"]',
-      '[data-testid*="gig"] a[href]',
-      ".basic-gig-card a[href]",
-      ".gig-wrapper a[href]",
-    ];
-    const found: string[] = [];
-    for (const sel of selectors) {
-      document.querySelectorAll(sel).forEach((a) => {
-        const href = (a as HTMLAnchorElement).href || (a as HTMLAnchorElement).getAttribute("href");
-        if (href) found.push(href);
-      });
+  const selectors = [
+    '[class*="gig-card" i] a[href]',
+    'article a[href*="/"]',
+    '[data-testid*="gig" i] a[href]',
+    ".basic-gig-card a[href]",
+    ".gig-wrapper a[href]",
+  ];
+  const hrefs: string[] = [];
+
+  for (const selector of selectors) {
+    const links = page.locator(selector);
+    const count = Math.min(await links.count().catch(() => 0), 150);
+    for (let i = 0; i < count; i++) {
+      const href = await links.nth(i).getAttribute("href").catch(() => null);
+      if (href) hrefs.push(href);
     }
-    if (found.length < 3) {
-      document.querySelectorAll('a[href*="/"]').forEach((a) => {
-        const href = (a as HTMLAnchorElement).href || (a as HTMLAnchorElement).getAttribute("href");
-        if (href) found.push(href);
-      });
+  }
+
+  if (hrefs.length < 3) {
+    const fallbackLinks = page.locator('a[href*="/"]');
+    const count = Math.min(await fallbackLinks.count().catch(() => 0), 250);
+    for (let i = 0; i < count; i++) {
+      const href = await fallbackLinks.nth(i).getAttribute("href").catch(() => null);
+      if (href) hrefs.push(href);
     }
-    return found;
-  });
+  }
 
   const seen = new Set<string>();
   const results: GigSearchResult[] = [];

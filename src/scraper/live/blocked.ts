@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { ScraperBlockedError, ScraperVerificationRequiredError } from "../types";
+import { ScraperVerificationRequiredError } from "../types";
 
 /** Press & hold / CAPTCHA / human touch — user must solve manually */
 export async function isVerificationRequired(page: Page): Promise<boolean> {
@@ -36,8 +36,8 @@ export async function assertPageAccessible(page: Page): Promise<void> {
     throw new ScraperVerificationRequiredError();
   }
   if (await isHardBlocked(page)) {
-    throw new ScraperBlockedError(
-      "Fiverr access denied. Use Paste Gig Links mode or complete verification and Retry."
+    throw new ScraperVerificationRequiredError(
+      "Fiverr access denied or sign-in verification required. Complete verification in the browser window, then Retry."
     );
   }
 }

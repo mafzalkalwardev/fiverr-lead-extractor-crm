@@ -43,11 +43,6 @@ export function normalizeFiverrUrl(href: string): string | null {
   }
 }
 
-export function isDemoPlaceholderUrl(url: string): boolean {
-  if (!url) return false;
-  return /demo\.ftsolutions\.local|example\.com|placeholder/i.test(url);
-}
-
 export function absolutizeUrl(src: string | null | undefined): string {
   if (!src) return "";
   if (src.startsWith("//")) return `https:${src}`;

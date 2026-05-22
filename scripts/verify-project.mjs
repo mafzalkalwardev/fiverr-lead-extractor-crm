@@ -57,7 +57,7 @@ const required = ["MONGODB_URI", "REDIS_URL", "JWT_SECRET"];
 for (const k of required) {
   process.env[k] ? pass(`env ${k}`) : fail(`env ${k}`, "not set in .env");
 }
-pass("SCRAPER_MODE", process.env.SCRAPER_MODE || "demo");
+pass("SCRAPER_MODE", process.env.SCRAPER_MODE || "playwright");
 
 // 3. MongoDB
 console.log("\n=== 3. MongoDB ===");
@@ -132,7 +132,7 @@ if (token) {
       }),
     });
     if (start.res.ok && start.data.job?._id) {
-      pass("Demo job start", start.data.job._id);
+      pass("Job start", start.data.job._id);
       const jobId = start.data.job._id;
 
       // Wait for worker
@@ -158,10 +158,10 @@ if (token) {
         fail("Excel export", `status=${exp.status} size=${buf.byteLength}`);
       }
     } else {
-      fail("Demo job start", start.data.error || start.res.status);
+      fail("Job start", start.data.error || start.res.status);
     }
   } catch (e) {
-    fail("Demo job flow", e.message);
+    fail("Job flow", e.message);
   }
 }
 

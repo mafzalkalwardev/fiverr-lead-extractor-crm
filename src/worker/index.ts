@@ -2,7 +2,7 @@ import "@/lib/load-env";
 import { Worker } from "bullmq";
 import { createRedisConnection } from "@/queue/connection";
 import { SCRAPE_QUEUE_NAME } from "@/queue/scrapeQueue";
-import { warmBrowser } from "@/scraper/live/browser";
+import { closeBrowser, warmBrowser } from "@/scraper/live/browser";
 import { processScrapeJob } from "./processJob";
 
 const connection = createRedisConnection();
@@ -38,6 +38,31 @@ worker.on("completed", (job) => {
 
 setInterval(setHeartbeat, 10_000);
 setHeartbeat();
+
+async function checkBrowserShutdownRequest() {
+  try {
+    const reason = await connection.get("browser:shutdown");
+    if (!reason) return;
+    await connection.del("browser:shutdown");
+    console.log(`[worker] Browser shutdown requested: ${reason}`);
+    await closeBrowser(true);
+  } catch (err) {
+    console.warn("[worker] Browser shutdown check failed:", err);
+  }
+}
+
+setInterval(checkBrowserShutdownRequest, 3_000);
+
+async function shutdown(signal: string) {
+  console.log(`[worker] ${signal} received. Closing worker and persistent browser.`);
+  await worker.close().catch(() => {});
+  await closeBrowser(true).catch(() => {});
+  await connection.quit().catch(() => {});
+  process.exit(0);
+}
+
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 console.log(`[worker] Started. Redis: ${redisUrl}`);
 console.log(`[worker] SCRAPER_MODE=${process.env.SCRAPER_MODE || "playwright"}`);

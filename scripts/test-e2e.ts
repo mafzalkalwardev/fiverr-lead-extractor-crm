@@ -86,10 +86,6 @@ async function main() {
     const sample = await Lead.findOne({ jobId: job._id }).lean();
     console.log(`   Sample lead: ${sample?.reviewerName} | ${sample?.country}`);
     console.log(`   Gig link: ${sample?.gigLink?.slice(0, 70)}`);
-    const fake = [sample?.gigLink, sample?.reviewerName].some((s) =>
-      /demo|ftsolutions\.local/i.test(s || "")
-    );
-    console.log(`   Fake data check: ${fake ? "FAIL" : "PASS"}`);
   }
 
   await closeScraper(true);

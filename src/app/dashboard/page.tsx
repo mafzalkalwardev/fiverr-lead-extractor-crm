@@ -72,12 +72,7 @@ export default function DashboardPage() {
                   className="flex items-center justify-between rounded-md border border-border p-4 hover:bg-muted/30"
                 >
                   <div>
-                    <p className="font-medium">
-                      {job.niche}
-                      {job.isLegacyDemo && (
-                        <span className="ml-2 text-xs text-amber-400">[DEMO]</span>
-                      )}
-                    </p>
+                    <p className="font-medium">{job.niche}</p>
                     <p className="text-xs text-muted-foreground">
                       {job.totalLeadsFound} leads · {job.extractionMode || "live"} ·{" "}
                       {formatDate(job.createdAt)}

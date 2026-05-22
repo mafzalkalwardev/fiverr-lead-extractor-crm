@@ -14,11 +14,13 @@ export async function discoverGigsViaBing(
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await sleep(2500);
 
-  const hrefs = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll("a[href]")).map(
-      (a) => (a as HTMLAnchorElement).href
-    );
-  });
+  const hrefs: string[] = [];
+  const links = page.locator("a[href]");
+  const count = Math.min(await links.count().catch(() => 0), 250);
+  for (let i = 0; i < count; i++) {
+    const href = await links.nth(i).getAttribute("href").catch(() => null);
+    if (href) hrefs.push(href);
+  }
 
   const seen = new Set<string>();
   const results: string[] = [];

@@ -35,7 +35,7 @@ function createWindow() {
     backgroundColor: "#0f172a",
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
-  mainWindow.loadURL(`http://localhost:${PORT}/login`);
+  mainWindow.loadURL(`http://localhost:${PORT}/`);
   mainWindow.on("page-title-updated", (e) => {
     e.preventDefault();
     mainWindow.setTitle(TITLE);
@@ -50,7 +50,7 @@ app.whenReady().then(() => {
   waitOn({ resources: [`http://localhost:${PORT}/api/system/status`], timeout: 120000 })
     .then(() => createWindow())
     .catch(() => {
-      console.warn("[electron] Server slow to start — opening window anyway");
+      console.warn("[electron] Server slow to start - opening window anyway");
       createWindow();
     });
 

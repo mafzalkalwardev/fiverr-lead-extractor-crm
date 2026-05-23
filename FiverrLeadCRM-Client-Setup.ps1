@@ -242,13 +242,12 @@ try {
     if (-not $NoStart) {
         Write-Step "Starting app"
         Start-Process -FilePath (Join-Path $InstallDir "Start Fiverr Lead CRM.bat") -WorkingDirectory $InstallDir
-        Start-Process "http://localhost:3000/login"
     }
 
     Write-Host ""
     Write-Host "Setup complete." -ForegroundColor Green
     Write-Host "Install folder: $InstallDir"
-    Write-Host "Login URL: http://localhost:3000/login"
+    Write-Host "App URL: http://localhost:3000/"
     Write-Host "Default admin: admin@ftsolutions.local / Admin@FT2024"
 } catch {
     Write-Host ""

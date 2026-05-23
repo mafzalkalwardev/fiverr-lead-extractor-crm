@@ -12,7 +12,7 @@ echo   Fiverr Lead Extractor CRM - FT Solutions
 echo  ============================================
 echo.
 echo  KEEP THIS WINDOW OPEN.
-echo  App URL: http://localhost:3000/login
+echo  App URL: http://localhost:3000/
 echo  Scraper browser opens when you START a job only.
 echo.
 
@@ -40,10 +40,10 @@ call npm.cmd run free:port
 call npm.cmd run free:browser
 
 echo.
-echo Starting... login page will open automatically.
+echo Starting... app window will open automatically.
 echo.
 
-start "Open Login" cmd /c "powershell -ExecutionPolicy Bypass -NoProfile -File scripts\open-login.ps1"
+start "Open Fiverr Lead CRM" cmd /c "powershell -ExecutionPolicy Bypass -NoProfile -File scripts\open-app.ps1"
 
 call npm.cmd run client:start:fast
 set EXITCODE=%ERRORLEVEL%

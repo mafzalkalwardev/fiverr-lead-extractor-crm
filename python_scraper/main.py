@@ -16,11 +16,11 @@ from worker import process_job
 
 
 async def setup_browser() -> None:
-    from browser import launch_browser, new_page
+    from browser import get_work_page, launch_browser
 
     print("[setup] Opening Fiverr — complete verification manually, then close this script.")
-    ctx = await launch_browser()
-    page = await ctx.new_page()
+    await launch_browser()
+    page = await get_work_page()
     await page.goto(f"{config.FIVERR_ORIGIN}/search/gigs?query=web%20development", wait_until="domcontentloaded")
     print("[setup] Press Enter here after you finish verification in Chrome…")
     loop = asyncio.get_running_loop()

@@ -1,5 +1,8 @@
 """
-Assist Fiverr 'Press & Hold' verification using Playwright mouse + pyautogui (Windows).
+Assist Fiverr 'Press & Hold' verification with page-scoped Playwright actions.
+
+OS-level mouse automation is disabled by default because it can move/click the
+user's real desktop. It can be enabled only with ALLOW_OS_MOUSE_AUTOMATION=true.
 """
 import asyncio
 import re
@@ -8,6 +11,8 @@ import time
 from typing import Optional
 
 from playwright.async_api import Frame, Locator, Page
+
+import config
 
 PRESS_HOLD_SELECTORS = [
     "#px-captcha",
@@ -53,13 +58,12 @@ def _focus_browser_on_windows() -> None:
 
 
 async def prepare_verification_ui(page: Page) -> None:
-    try:
-        await page.bring_to_front()
-        for p in page.context.pages:
-            await p.bring_to_front()
-    except Exception:
-        pass
-    _focus_browser_on_windows()
+    if config.FOCUS_BROWSER_ON_VERIFICATION:
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+        _focus_browser_on_windows()
     await asyncio.sleep(0.4)
 
 
@@ -111,6 +115,8 @@ async def _hold_with_playwright_mouse(
 
 
 def _hold_with_pyautogui(screen_x: float, screen_y: float, hold_seconds: float = 6.0) -> bool:
+    if not config.ALLOW_OS_MOUSE_AUTOMATION:
+        return False
     try:
         import pyautogui
     except ImportError:
@@ -156,9 +162,10 @@ async def try_press_and_hold(page: Page, hold_seconds: float = 6.0) -> bool:
     cy = box["y"] + box["height"] / 2
 
     ok = await _hold_with_playwright_mouse(page, loc, hold_seconds)
-    coords = await _viewport_to_screen(page, cx, cy)
-    if coords:
-        ok = _hold_with_pyautogui(coords[0], coords[1], hold_seconds) or ok
+    if config.ALLOW_OS_MOUSE_AUTOMATION:
+        coords = await _viewport_to_screen(page, cx, cy)
+        if coords:
+            ok = _hold_with_pyautogui(coords[0], coords[1], hold_seconds) or ok
     return ok
 
 

@@ -1,150 +1,72 @@
-# Client delivery guide — Fiverr Lead Extractor CRM
+# Client Delivery Guide - Fiverr Lead Extractor CRM
 
-This project is a **local business application**, not a public website like Fiverr.com. The client runs it on their PC (or on a server you manage). There is no single “app link” unless you deploy it yourself.
+Do not hand the client this editable project folder as the final product.
 
----
+Use one of these delivery models:
 
-## What to give the client
+## Recommended: Hosted Web Link
 
-| Deliverable | Purpose |
-|-------------|---------|
-| **Project folder** (or ZIP) | Full app + Python scraper |
-| **`.env`** (configured by you) | MongoDB URL, JWT secret — **never** put admin password on the login page |
-| **`CLIENT_DELIVERY.md`** (this file) | How to run |
-| **Admin login** (email + password) | Send privately (email/WhatsApp) — created with `npm run seed:admin` |
-| **Optional:** Desktop shortcut | Runs `npm run client:start` (see below) |
+Host the app on a Windows VPS or desktop/server you control, then give the client only:
 
-Do **not** commit `.env` to Git. Admin credentials live only in `.env` and your private message to the client.
+- The app URL, for example `https://crm.yourdomain.com`
+- A client login
+- Basic usage instructions
 
----
+The code, `.env`, MongoDB connection string, admin account, scraper profile, and browser session stay on your server.
 
-## Two ways to deliver
+This is the safest option because the client cannot edit code or see secrets. The Python scraper also needs a persistent Chromium profile, which is much easier to manage on a server than inside a public static/web host.
 
-### Option A — Client’s computer (recommended)
+Do not use serverless-only hosting for the scraper. The scraper needs a long-running Python process and a persistent browser profile.
 
-Everything runs locally: CRM in the browser + Python scraper + MongoDB.
-
-**Requirements on client PC**
-
-- Windows 10/11
-- [Node.js 20+](https://nodejs.org/)
-- [MongoDB](https://www.mongodb.com/try/download/community) (running as a service)
-- Python 3.11+ (for scraper)
-
-**One-time setup (you or client)**
+Production process on the server:
 
 ```powershell
-cd "C:\path\to\Fiverr Scraper"
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r python_scraper\requirements.txt
-playwright install chromium
 npm install
-copy .env.example .env
-# Edit .env: MONGODB_URI, JWT_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
+npm run build
 npm run seed:admin
-npm run setup:browser:py
+concurrently -n web,scraper "npm start" "npm run scraper:py"
 ```
 
-**Every day — start the app (no coding required)**
+Run those under a process manager or Windows service for real delivery.
 
-Double-click:
+## Alternative: Packaged Windows App
 
-**`Start Fiverr Lead CRM.bat`** (daily use — fast start)
+If the client must run it locally, build an installer/executable yourself and give them that installer, not source code.
 
-If the page shows errors, run once: **`Repair Start.bat`**
+The current repo already has an Electron shell, but packaging this app properly must bundle or install:
 
-(in the project folder — copy a shortcut to the client’s Desktop)
+- The built Next.js app
+- The Python scraper
+- A Python runtime or prepared venv
+- Playwright Chromium
+- The configured `.env`
+- MongoDB access, usually MongoDB Atlas
 
-Or run:
+After packaging, the client should only see an app icon/login screen. They should not receive `.ts`, `.tsx`, `.py`, `.env`, or project folders.
 
-```powershell
-npm run client:start
-```
+## Safe Scraper Defaults
 
-Then open: **http://localhost:3000/setup** (or the port shown in the terminal).
-
-Sign in with the credentials you sent privately.
-
-**Optional desktop window (Electron — feels like an “app”)**
-
-```powershell
-npm run electron:app
-```
-
-Starts the CRM + scraper and opens a desktop window (not a separate `.exe` installer unless you package with electron-builder later).
-
-**There is no public website link** unless you deploy to a VPS yourself. The client uses **localhost** on their PC.
-
----
-
-### Option B — You host on a VPS (advanced)
-
-Deploy Next.js + MongoDB + Python scraper on a server (e.g. DigitalOcean, AWS). Client opens:
-
-`https://your-domain.com`
-
-You must:
-
-1. Build: `npm run build` → `npm start` (port 3000 behind nginx)
-2. Run Python scraper as a **system service** (always on): `npm run scraper:py`
-3. Set `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_CLIENT_MODE=true` in `.env`
-4. Use HTTPS and a strong `JWT_SECRET`
-
-This is more work; most clients use **Option A**.
-
----
-
-## How it works after “deployment”
-
-1. **CRM (web UI)** — Create jobs, view leads, export Excel.
-2. **Python scraper** — Polls MongoDB every ~1.5s, picks `pending` jobs, opens Fiverr in Chromium, saves US/Canada leads.
-3. **MongoDB** — Stores jobs, leads, users.
-
-The scraper must be running for jobs to move from **Pending** → **Running**. `npm run client:start` starts both CRM and scraper automatically.
-
----
-
-## Client-facing settings (`.env`)
+Client machines should keep these settings:
 
 ```env
-NEXT_PUBLIC_CLIENT_MODE=true
+SCRAPER_ENGINE=python
 PLAYWRIGHT_HEADLESS=false
-BLOCK_HEAVY_RESOURCES=true
-PYTHON_SCRAPER_POLL_SEC=1.5
-DEFAULT_DELAY_SECONDS=2
-MAX_PAGES_LIMIT=0
+ALLOW_OS_MOUSE_AUTOMATION=false
+FOCUS_BROWSER_ON_VERIFICATION=false
 ```
 
-- `BLOCK_HEAVY_RESOURCES=true` — faster pages, less RAM (review image URLs still captured from HTML).
-- `PLAYWRIGHT_HEADLESS=true` — no visible browser (use after Fiverr verification is saved in profile).
+`ALLOW_OS_MOUSE_AUTOMATION=false` prevents the scraper from moving/clicking the user's real desktop mouse. Verification assistance stays inside the Playwright page only.
 
----
+If Fiverr verification appears, the client solves it in the scraper Chromium window. The app will continue after the session is verified.
 
-## Admin credentials
+## What Not To Deliver
 
-- Set in `.env`: `ADMIN_EMAIL`, `ADMIN_PASSWORD`
-- Create user: `npm run seed:admin`
-- **Never** display these on the login screen (already removed in the UI).
+Do not deliver:
 
-To add client users: sign in as admin → **Users** → create accounts with role `user`.
+- A raw ZIP of the repo
+- `.env` with admin secrets visible
+- Source files as the runnable product
+- Browser profile/cache folders
+- A dev command such as `npm run dev` as the client-facing launch method
 
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| Jobs stay **pending** | Start scraper: `npm run scraper:py` or `npm run client:start` |
-| “Scraper service offline” banner | Same as above |
-| Browser profile locked | `npm run free:browser` then restart |
-| Slow UI in dev | Use production: `npm run build` then `npm run client:prod` |
-| Fiverr verification | Complete once in browser; click **Retry** on the job |
-
----
-
-## Support contact
-
-Configured in branding: **FT Solutions** · phone in `src/lib/constants.ts`.
-
-For delivery, you can white-label `COMPANY_NAME` / `COMPANY_PHONE` before handing off the ZIP.
+For a professional handoff, use either a hosted link or a packaged installer.

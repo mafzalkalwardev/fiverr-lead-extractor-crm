@@ -36,8 +36,12 @@ next-env.d.ts
 /test-results/
 .playwright-fiverr-profile/
 /browser-profile/
+/browser-profile-py/
+/browser-profile-py-fresh/
 debug-fiverr.png
 /data/uploads/
+__pycache__/
+*.pyc
 
 # local Redis 5 portable (optional)
 /tools/redis5/

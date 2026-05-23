@@ -1,14 +1,27 @@
-2026/05/22-17:04:50.441 34d0 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/MANIFEST-000001
-2026/05/22-17:04:50.447 34d0 Recovering log #9
-2026/05/22-17:04:50.456 34d0 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/000009.log 
-2026/05/22-17:04:53.162 3598 Level-0 table #13: started
-2026/05/22-17:04:53.193 3598 Level-0 table #13: 18725 bytes OK
-2026/05/22-17:04:53.197 3598 Delete type=0 #9
-2026/05/22-17:04:53.199 3598 Compacting 4@0 + 0@1 files
-2026/05/22-17:04:53.248 3598 Generated table #14@0: 2 keys, 145 bytes
-2026/05/22-17:04:53.248 3598 Compacted 4@0 + 0@1 files => 145 bytes
-2026/05/22-17:04:53.251 3598 compacted to: files[ 0 1 0 0 0 0 0 ]
-2026/05/22-17:04:53.254 3598 Delete type=2 #3
-2026/05/22-17:04:53.254 3598 Delete type=2 #7
-2026/05/22-17:04:53.254 3598 Delete type=2 #10
-2026/05/22-17:04:53.255 3598 Delete type=2 #13
+2026/05/23-04:43:05.131 1fc4 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/MANIFEST-000001
+2026/05/23-04:43:05.133 1fc4 Recovering log #12
+2026/05/23-04:43:05.137 1fc4 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/000012.log 
+2026/05/23-05:25:06.655 12ec Level-0 table #17: started
+2026/05/23-05:25:06.666 12ec Level-0 table #17: 13884 bytes OK
+2026/05/23-05:25:06.670 12ec Delete type=0 #12
+2026/05/23-05:47:06.662 12ec Level-0 table #19: started
+2026/05/23-05:47:06.674 12ec Level-0 table #19: 18503 bytes OK
+2026/05/23-05:47:06.677 12ec Delete type=0 #16
+2026/05/23-06:02:06.698 12ec Level-0 table #21: started
+2026/05/23-06:02:06.722 12ec Level-0 table #21: 20318 bytes OK
+2026/05/23-06:02:06.729 12ec Delete type=0 #18
+2026/05/23-06:16:38.842 12ec Level-0 table #23: started
+2026/05/23-06:16:38.859 12ec Level-0 table #23: 19533 bytes OK
+2026/05/23-06:16:38.875 12ec Delete type=0 #20
+2026/05/23-06:16:38.878 1fc4 Compacting 4@0 + 1@1 files
+2026/05/23-06:16:38.896 1fc4 Generated table #24@0: 621 keys, 28516 bytes
+2026/05/23-06:16:38.896 1fc4 Compacted 4@0 + 1@1 files => 28516 bytes
+2026/05/23-06:16:38.897 1fc4 compacted to: files[ 0 1 0 0 0 0 0 ]
+2026/05/23-06:16:38.899 1fc4 Delete type=2 #14
+2026/05/23-06:16:38.900 1fc4 Delete type=2 #17
+2026/05/23-06:16:38.901 1fc4 Delete type=2 #19
+2026/05/23-06:16:38.902 1fc4 Delete type=2 #21
+2026/05/23-06:16:38.902 1fc4 Delete type=2 #23
+2026/05/23-06:31:40.081 1fc4 Level-0 table #26: started
+2026/05/23-06:31:40.120 1fc4 Level-0 table #26: 14138 bytes OK
+2026/05/23-06:31:40.129 1fc4 Delete type=0 #22

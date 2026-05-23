@@ -1,6 +1,14 @@
-2026/05/22-16:25:51.157 279c Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/MANIFEST-000001
-2026/05/22-16:25:51.159 279c Recovering log #6
-2026/05/22-16:25:51.164 279c Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/000006.log 
-2026/05/22-16:48:28.447 2294 Level-0 table #10: started
-2026/05/22-16:48:28.465 2294 Level-0 table #10: 16766 bytes OK
-2026/05/22-16:48:28.469 2294 Delete type=0 #6
+2026/05/22-17:04:50.441 34d0 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/MANIFEST-000001
+2026/05/22-17:04:50.447 34d0 Recovering log #9
+2026/05/22-17:04:50.456 34d0 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/000009.log 
+2026/05/22-17:04:53.162 3598 Level-0 table #13: started
+2026/05/22-17:04:53.193 3598 Level-0 table #13: 18725 bytes OK
+2026/05/22-17:04:53.197 3598 Delete type=0 #9
+2026/05/22-17:04:53.199 3598 Compacting 4@0 + 0@1 files
+2026/05/22-17:04:53.248 3598 Generated table #14@0: 2 keys, 145 bytes
+2026/05/22-17:04:53.248 3598 Compacted 4@0 + 0@1 files => 145 bytes
+2026/05/22-17:04:53.251 3598 compacted to: files[ 0 1 0 0 0 0 0 ]
+2026/05/22-17:04:53.254 3598 Delete type=2 #3
+2026/05/22-17:04:53.254 3598 Delete type=2 #7
+2026/05/22-17:04:53.254 3598 Delete type=2 #10
+2026/05/22-17:04:53.255 3598 Delete type=2 #13

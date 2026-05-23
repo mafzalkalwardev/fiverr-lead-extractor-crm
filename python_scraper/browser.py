@@ -123,7 +123,10 @@ def _launch_kwargs() -> dict[str, Any]:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         ),
-        "viewport": {"width": 1440, "height": 900},
+        "viewport": {
+            "width": config.BROWSER_WINDOW_WIDTH,
+            "height": config.BROWSER_WINDOW_HEIGHT,
+        },
         "locale": "en-US",
         "timezone_id": "America/New_York",
         "args": [
@@ -136,6 +139,8 @@ def _launch_kwargs() -> dict[str, Any]:
             "--mute-audio",
             "--no-first-run",
             "--no-default-browser-check",
+            f"--window-size={config.BROWSER_WINDOW_WIDTH},{config.BROWSER_WINDOW_HEIGHT}",
+            f"--window-position={config.BROWSER_WINDOW_X},{config.BROWSER_WINDOW_Y}",
         ],
         "extra_http_headers": {"Accept-Language": "en-US,en;q=0.9"},
         "ignore_default_args": ["--enable-automation"],
@@ -160,18 +165,51 @@ async def _install_resource_filter(ctx: BrowserContext) -> None:
     await ctx.route("**/*", handler)
 
 
-async def _normalize_single_tab(ctx: BrowserContext) -> Page:
-    """One window, one tab — close any extra tabs Playwright opens."""
-    pages = list(ctx.pages)
-    for extra in pages[1:]:
-        try:
-            await extra.close()
-        except Exception:
-            pass
-    if ctx.pages:
-        return ctx.pages[0]
-    page = await ctx.new_page()
-    return page
+def _set_page_defaults(page: Page) -> None:
+    page.set_default_timeout(60_000)
+    page.set_default_navigation_timeout(90_000)
+
+
+async def _safe_close_page(page: Page) -> None:
+    try:
+        if not page.is_closed():
+            await page.close()
+    except Exception:
+        pass
+
+
+async def _normalize_single_tab(
+    ctx: BrowserContext, keep: Optional[Page] = None
+) -> Page:
+    """Keep one controlled scraper tab and close stale/popup tabs."""
+    global _work_page
+
+    pages = [p for p in list(ctx.pages) if not p.is_closed()]
+    if keep and not keep.is_closed() and keep in pages:
+        primary = keep
+    elif _work_page and not _work_page.is_closed() and _work_page in pages:
+        primary = _work_page
+    elif pages:
+        primary = pages[0]
+    else:
+        primary = await ctx.new_page()
+        pages = [primary]
+
+    for extra in pages:
+        if extra is primary:
+            continue
+        await _safe_close_page(extra)
+
+    _set_page_defaults(primary)
+    _work_page = primary
+    return primary
+
+
+async def close_extra_pages(keep: Page) -> Page:
+    """Public helper for verification code after a challenge opens a new tab."""
+    if keep.is_closed():
+        return await get_work_page()
+    return await _normalize_single_tab(keep.context, keep)
 
 
 async def launch_browser() -> BrowserContext:
@@ -236,11 +274,10 @@ async def get_work_page() -> Page:
         try:
             ctx = await launch_browser()
             if _work_page and not _work_page.is_closed():
+                await _normalize_single_tab(ctx, _work_page)
                 return _work_page
 
             _work_page = await _normalize_single_tab(ctx)
-            _work_page.set_default_timeout(60_000)
-            _work_page.set_default_navigation_timeout(90_000)
             return _work_page
         except Exception as err:
             if attempt < 2 and (

@@ -16,12 +16,21 @@ import config
 
 PRESS_HOLD_SELECTORS = [
     "#px-captcha",
+    "#px-captcha-wrapper",
+    "#px-captcha-container",
     '[id*="px-captcha" i]',
     '[id*="px" i]',
     "iframe[src*='captcha']",
     "iframe[src*='perimeterx']",
     "iframe[title*='challenge' i]",
+    "iframe[title*='captcha' i]",
+    '[aria-label*="press" i]',
+    '[aria-label*="hold" i]',
+    '[role="button"]:has-text("Press")',
+    '[role="button"]:has-text("Hold")',
     '[class*="hold" i]',
+    '[class*="captcha" i]',
+    '[class*="challenge" i]',
     'button:has-text("Press")',
     'p:has-text("Press")',
 ]
@@ -108,7 +117,12 @@ async def _hold_with_playwright_mouse(
     print(f"[verification] Playwright hold at ({x:.0f},{y:.0f}) for {hold_seconds:.1f}s")
     await page.mouse.move(x, y)
     await page.mouse.down()
-    await asyncio.sleep(hold_seconds)
+    end_at = time.monotonic() + hold_seconds
+    wiggle = 1
+    while time.monotonic() < end_at:
+        await asyncio.sleep(min(0.45, max(0.05, end_at - time.monotonic())))
+        wiggle *= -1
+        await page.mouse.move(x + wiggle, y)
     await page.mouse.up()
     await asyncio.sleep(1.0)
     return True

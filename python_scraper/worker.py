@@ -11,8 +11,12 @@ from browser import (
 )
 from db import (
     append_activity,
+    clear_failed_url,
     get_job,
+    mark_failed_url_retry,
+    previous_gig_urls_for_niche,
     push_error,
+    record_failed_url,
     refresh_job_counters,
     save_lead_if_qualified,
     update_job,
@@ -39,7 +43,21 @@ def _initial_state(job: dict) -> dict:
         "failed_gigs": job.get("failedGigs") or 0,
         "gig_queue": list(job.get("gigQueue") or []),
         "resume_index": job.get("resumeIndex") or 0,
+        "failed_urls": [],
     }
+
+
+def _review_image_mode(job: dict) -> str:
+    mode = job.get("reviewImageMode") or "with_image"
+    return "without_image" if mode == "without_image" else "with_image"
+
+
+def _review_image_mode_label(job: dict) -> str:
+    return (
+        "without review image links"
+        if _review_image_mode(job) == "without_image"
+        else "with review image links"
+    )
 
 
 async def _save_failure_artifacts(page, job_id: str, gig_url: str) -> str:
@@ -183,10 +201,13 @@ async def process_html_import(job: dict, job_id: str, state: dict) -> str:
 async def _save_reviews(job: dict, job_id: str, gig: dict, reviews: list[dict], state: dict) -> None:
     max_leads = job.get("maxTotalLeads") or 100
     total = state["us_leads"] + state["canada_leads"]
+    image_mode = _review_image_mode(job)
 
     for review in reviews:
         if total >= max_leads:
             break
+        if image_mode == "without_image":
+            review = {**review, "reviewedImageLink": ""}
         saved, country, reason = save_lead_if_qualified(job, gig, review)
         if saved:
             bucket = count_lead_bucket(country)
@@ -210,7 +231,7 @@ async def _save_reviews(job: dict, job_id: str, gig: dict, reviews: list[dict], 
             )
 
 
-async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
+async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int = 0) -> str:
     queue = state["gig_queue"]
     start = state["resume_index"]
     max_leads = job.get("maxTotalLeads") or 100
@@ -218,6 +239,8 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
     max_reviews = job.get("maxReviewsPerGig")
     if max_reviews is None:
         max_reviews = 0
+    image_mode = _review_image_mode(job)
+    image_label = _review_image_mode_label(job)
 
     page = await get_work_page()
     for i in range(start, len(queue)):
@@ -228,9 +251,10 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                 break
 
             gig_url = queue[i]
+            attempt_note = "retry " if retry_pass > 0 else ""
             append_activity(
                 job_id,
-                f"Gig {i + 1}/{len(queue)} — extracting all US/CA reviews with images",
+                f"Gig {i + 1}/{len(queue)} {attempt_note}— extracting US/CA reviews {image_label}",
             )
             update_job(
                 job_id,
@@ -277,6 +301,8 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                     job_id,
                     seller_username,
                     progress_base=state["reviews_checked"],
+                    review_image_mode=image_mode,
+                    main_gig_image=gig.get("mainGigImage") or "",
                 )
 
                 append_activity(
@@ -288,6 +314,7 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                 state["gigs_scanned"] += 1
                 state["reviews_checked"] += checked
                 await _save_reviews(job, job_id, gig, reviews, state)
+                clear_failed_url(job_id, gig_url)
                 state["resume_index"] = i + 1
                 refresh_job_counters(job_id, state)
 
@@ -304,7 +331,7 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                 cleared = await wait_until_verification_clears(page, job_id, gig_url)
                 if cleared:
                     state["resume_index"] = i
-                    return await process_gig_list(job, job_id, state)
+                    return await process_gig_list(job, job_id, state, retry_pass)
                 return "verification_required"
 
             except BlockedError as err:
@@ -330,8 +357,49 @@ async def process_gig_list(job: dict, job_id: str, state: dict) -> str:
                 artifacts = await _save_failure_artifacts(page, job_id, gig_url)
                 artifact_msg = f" {artifacts}" if artifacts else ""
                 push_error(job_id, f"{gig_url}: {err_msg}{artifact_msg}")
+                record_failed_url(job_id, gig_url, f"{err_msg}{artifact_msg}")
+                state.setdefault("failed_urls", []).append(gig_url)
+                append_activity(
+                    job_id,
+                    f"Failed gig saved for retry: {gig_url} reason={err_msg}",
+                )
                 append_activity(job_id, f"Selector failure artifacts saved:{artifact_msg}" if artifact_msg else "Selector failure artifact save skipped")
                 refresh_job_counters(job_id, state)
+
+    failed_urls = list(dict.fromkeys(state.get("failed_urls") or []))
+    if failed_urls and retry_pass < config.MAX_FAILED_URL_RETRY_PASSES:
+        append_activity(
+            job_id,
+            f"Retrying {len(failed_urls)} failed gig(s) once before completing",
+        )
+        for failed_url in failed_urls:
+            mark_failed_url_retry(job_id, failed_url)
+        original_queue = list(queue)
+        original_resume = max(state.get("resume_index") or 0, len(original_queue))
+        state["gig_queue"] = failed_urls
+        state["resume_index"] = 0
+        state["failed_urls"] = []
+        update_job(
+            job_id,
+            {
+                "gigQueue": failed_urls,
+                "resumeIndex": 0,
+                "totalGigs": len(failed_urls),
+            },
+        )
+        outcome = await process_gig_list(job, job_id, state, retry_pass + 1)
+        if outcome == "completed":
+            state["gig_queue"] = original_queue
+            state["resume_index"] = original_resume
+            update_job(
+                job_id,
+                {
+                    "gigQueue": original_queue,
+                    "resumeIndex": original_resume,
+                    "totalGigs": len(original_queue),
+                },
+            )
+        return outcome
 
     update_job(
         job_id,
@@ -364,6 +432,7 @@ async def process_job(job: dict) -> None:
         job_id,
         f'Started · mode={mode} · niche="{niche}" · maxGigs={max_gigs_log} (0=all)',
     )
+    append_activity(job_id, f"Review image option: {_review_image_mode_label(job)}")
     update_job(job_id, {"status": "running", "verificationMessage": ""})
     append_activity(job_id, "Opening Fiverr scraper browser (one window for this job)")
 
@@ -404,8 +473,19 @@ async def process_job(job: dict) -> None:
                 job_id,
                 f"Discovering gigs — {pages_note} ({gigs_note})",
             )
+            seen_before = previous_gig_urls_for_niche(job, niche, job_id)
+            if seen_before:
+                append_activity(
+                    job_id,
+                    f"Resume-by-keyword: skipping {len(seen_before)} gig(s) already queued for this niche",
+                )
             update_job(job_id, {"currentSearchPage": 0, "discoveryPagesScanned": 0})
-            urls, source = await discover_gig_urls(niche, max_gigs, job_id)
+            urls, source = await discover_gig_urls(
+                niche,
+                max_gigs,
+                job_id,
+                exclude_urls=seen_before,
+            )
             queue = urls
             update_job(
                 job_id,

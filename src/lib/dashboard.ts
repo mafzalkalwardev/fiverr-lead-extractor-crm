@@ -48,6 +48,7 @@ export function normalizeJob(doc: Record<string, unknown>) {
     ...doc,
     niche: (doc.niche as string) || (doc.keyword as string) || (doc.category as string) || "",
     extractionMode: (doc.extractionMode as string) || "live",
+    reviewImageMode: (doc.reviewImageMode as string) || "with_image",
     targetCountries: (doc.targetCountries as string[]) || ["United States", "Canada"],
     gigsScanned: (doc.gigsScanned as number) ?? 0,
     reviewsChecked: (doc.reviewsChecked as number) ?? 0,
@@ -69,6 +70,7 @@ export function normalizeJob(doc: Record<string, unknown>) {
     discoverySource: (doc.discoverySource as string) || "",
     urlsDiscovered: (doc.urlsDiscovered as number) ?? 0,
     activityLog: (doc.activityLog as string[]) || [],
+    skippedExistingGigs: (doc.skippedExistingGigs as number) ?? 0,
     errors,
     jobErrors: errors,
   };

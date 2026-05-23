@@ -10,7 +10,6 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/providers/toast-provider";
 import { BrandLogo, BrandFooter } from "@/components/branding";
 import { APP_NAME } from "@/lib/constants";
-import { Shield } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -43,7 +42,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background p-6">
+    <div suppressHydrationWarning className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background p-6">
       <div
         className="pointer-events-none absolute inset-0 opacity-40"
         aria-hidden
@@ -98,10 +97,12 @@ export default function LoginPage() {
               {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
-          <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-            <Shield className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            Credentials are issued by your administrator only.
-          </p>
+          <div className="mt-6 text-center text-sm">
+            <span className="text-muted-foreground">Don&apos;t have an account? </span>
+            <a href="/register" className="font-medium text-primary hover:underline">
+              Sign up
+            </a>
+          </div>
         </CardContent>
       </Card>
       <div className="relative mt-8">

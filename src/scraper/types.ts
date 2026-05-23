@@ -51,9 +51,22 @@ export interface GigExtractionResult {
   reviewsChecked?: number;
 }
 
+export interface ReviewExtractionOptions {
+  offlineHtml?: boolean;
+  reviewImageMode?: "with_image" | "without_image";
+}
+
 export interface ScraperAdapter {
   searchFiverrGigs(keyword: string, maxGigs: number): Promise<GigSearchResult[]>;
-  processGig(gigUrl: string, maxReviewsPerGig: number): Promise<GigExtractionResult>;
+  processGig(
+    gigUrl: string,
+    maxReviewsPerGig: number,
+    options?: ReviewExtractionOptions
+  ): Promise<GigExtractionResult>;
   extractGigData(gigUrl: string): Promise<GigData>;
-  extractReviews(gigUrl: string, maxReviews: number): Promise<ReviewData[]>;
+  extractReviews(
+    gigUrl: string,
+    maxReviews: number,
+    options?: ReviewExtractionOptions
+  ): Promise<ReviewData[]>;
 }

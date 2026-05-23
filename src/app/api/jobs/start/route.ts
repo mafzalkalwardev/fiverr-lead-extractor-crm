@@ -9,8 +9,10 @@ import { DEFAULT_TARGET_COUNTRIES } from "@/lib/constants";
 import { getScraperMode } from "@/lib/scraper-mode";
 import {
   EXTRACTION_MODES,
+  REVIEW_IMAGE_MODES,
   parseGigUrlsFromText,
   type ExtractionMode,
+  type ReviewImageMode,
 } from "@/lib/extraction-modes";
 import { isRedisConnectionError } from "@/queue/connection";
 import { enqueueScrapeJob } from "@/queue/scrapeQueue";
@@ -57,6 +59,7 @@ export async function POST(req: NextRequest) {
         maxTotalLeads: form.get("maxTotalLeads"),
         delaySeconds: form.get("delaySeconds"),
         manualGigUrls: form.get("manualGigUrls"),
+        reviewImageMode: form.get("reviewImageMode"),
       };
       const uploads = form.getAll("htmlFiles");
       for (const entry of uploads) {
@@ -80,6 +83,11 @@ export async function POST(req: NextRequest) {
     const extractionMode = (String(body.extractionMode || "live") as ExtractionMode);
     if (!EXTRACTION_MODES.includes(extractionMode)) {
       return NextResponse.json({ error: "Invalid extraction mode" }, { status: 400 });
+    }
+
+    const reviewImageMode = (String(body.reviewImageMode || "with_image") as ReviewImageMode);
+    if (!REVIEW_IMAGE_MODES.includes(reviewImageMode)) {
+      return NextResponse.json({ error: "Invalid review image option" }, { status: 400 });
     }
 
     const limits = clampJobLimits({
@@ -132,7 +140,9 @@ export async function POST(req: NextRequest) {
     const job = await ScrapeJob.create({
       userId: user._id,
       niche,
+      keyword: niche,
       extractionMode,
+      reviewImageMode,
       targetCountries,
       ...limits,
       status: "pending",

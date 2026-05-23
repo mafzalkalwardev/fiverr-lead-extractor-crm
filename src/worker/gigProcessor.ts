@@ -112,7 +112,8 @@ export async function processGigList(
 
       const { gig, reviews, reviewsChecked } = await scraper.processGig(
         gigUrl,
-        job.maxReviewsPerGig
+        job.maxReviewsPerGig,
+        { reviewImageMode: job.reviewImageMode || "with_image" }
       );
       const seller = gig.sellerName || gig.sellerUsername || "";
 
@@ -142,6 +143,10 @@ export async function processGigList(
       for (let reviewIndex = 0; reviewIndex < reviews.length; reviewIndex++) {
         const review = reviews[reviewIndex];
         if (state.totalLeads >= job.maxTotalLeads) break;
+        const reviewForSave =
+          (job.reviewImageMode || "with_image") === "without_image"
+            ? { ...review, reviewedImageLink: "" }
+            : review;
 
         await appendJobLog(
           jobId,
@@ -149,7 +154,7 @@ export async function processGigList(
         );
 
         const { saved, country, reason } = await saveLeadIfQualified(
-          { jobId: job._id, userId: job.userId, niche, gig, review },
+          { jobId: job._id, userId: job.userId, niche, gig, review: reviewForSave },
           job.targetCountries
         );
 

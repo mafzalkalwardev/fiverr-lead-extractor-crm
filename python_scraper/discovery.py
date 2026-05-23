@@ -200,6 +200,8 @@ async def discover_gig_urls(
 
     max_pages: Optional[int] = None,
 
+    exclude_urls: Optional[set[str]] = None,
+
 ) -> tuple[list[str], str]:
 
     """
@@ -213,6 +215,7 @@ async def discover_gig_urls(
     unlimited_gigs = max_gigs <= 0
 
     page = await get_work_page()
+    excluded = set(exclude_urls or set())
 
     all_urls: list[str] = []
 
@@ -221,6 +224,7 @@ async def discover_gig_urls(
     page_num = 0
 
     empty_streak = 0
+    skipped_existing_total = 0
 
 
 
@@ -283,6 +287,7 @@ async def discover_gig_urls(
         batch = await collect_gig_cards(page)
 
         new_count = 0
+        skipped_existing = 0
 
         for gig_url in batch:
 
@@ -292,6 +297,11 @@ async def discover_gig_urls(
 
             seen.add(gig_url)
 
+            if gig_url in excluded:
+                skipped_existing += 1
+                skipped_existing_total += 1
+                continue
+
             all_urls.append(gig_url)
 
             new_count += 1
@@ -299,22 +309,26 @@ async def discover_gig_urls(
             if not unlimited_gigs and len(all_urls) >= max_gigs:
                 break
 
-        print(f"[discovery] Page {page_num}: +{new_count} gigs (total {len(all_urls)})")
+        print(
+            f"[discovery] Page {page_num}: +{new_count} gigs "
+            f"(total {len(all_urls)}, skipped existing {skipped_existing})"
+        )
 
         append_activity(
 
             job_id,
 
-            f"Search page {page_num}: +{new_count} new gigs ({len(all_urls)} total)",
+            f"Search page {page_num}: +{new_count} new gigs ({len(all_urls)} total, skipped {skipped_existing} already used)",
 
         )
+        update_job(job_id, {"skippedExistingGigs": skipped_existing_total})
 
 
 
         if not unlimited_gigs and len(all_urls) >= max_gigs:
             break
 
-        if new_count == 0:
+        if new_count == 0 and skipped_existing == 0:
 
             empty_streak += 1
 

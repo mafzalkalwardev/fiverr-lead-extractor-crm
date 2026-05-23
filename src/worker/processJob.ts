@@ -96,6 +96,10 @@ export async function processScrapeJob(jobId: string): Promise<void> {
     await appendJobLog(jobId, `Started | mode=${job.extractionMode} | niche="${niche}"`);
     await appendJobLog(
       jobId,
+      `Review image option=${job.reviewImageMode || "with_image"}`
+    );
+    await appendJobLog(
+      jobId,
       `Targets=${job.targetCountries.join(", ")} | maxGigs=${job.maxGigs} | maxReviewsPerGig=${job.maxReviewsPerGig} | maxTotalLeads=${job.maxTotalLeads}`
     );
     if ((job.resumeIndex || 0) > 0 || (job.gigQueue?.length || 0) > 0) {

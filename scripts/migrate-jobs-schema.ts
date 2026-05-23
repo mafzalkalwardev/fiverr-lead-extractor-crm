@@ -17,6 +17,8 @@ async function main() {
     if (!doc.niche && doc.keyword) set.niche = doc.keyword;
     if (!doc.niche && doc.category) set.niche = doc.category;
     if (!doc.errors && doc.jobErrors) set.errors = doc.jobErrors;
+    if (!doc.reviewImageMode) set.reviewImageMode = "with_image";
+    if (doc.skippedExistingGigs === undefined) set.skippedExistingGigs = 0;
     if (doc.keyword !== undefined || doc.category !== undefined) {
       await col.updateOne(
         { _id: doc._id },

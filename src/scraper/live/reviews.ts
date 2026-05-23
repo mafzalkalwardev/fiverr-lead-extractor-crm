@@ -1,5 +1,5 @@
 import type { Page, Locator } from "playwright";
-import type { ReviewData } from "../types";
+import type { ReviewData, ReviewExtractionOptions } from "../types";
 import { sleep } from "@/lib/utils";
 import { normalizeCountry } from "@/lib/leads";
 import { assertPageAccessible } from "./blocked";
@@ -296,6 +296,7 @@ function isLikelyReviewerName(value: string): boolean {
   const text = cleanText(value).replace(/^@/, "");
   if (text.length < 2 || text.length > 60) return false;
   if (/^\d+(?:\.\d+)?$/.test(text)) return false;
+  if (/^[1-5](?:\.\d)?\s*(?:stars?|rating|\/\s*5)?$/i.test(text)) return false;
   if (/^(from|seller|buyer|reviews?|helpful|show more|see more|contact|order|rating)$/i.test(text)) {
     return false;
   }
@@ -339,7 +340,9 @@ function stripKnownReviewChrome(text: string, reviewerName: string, country: str
       .replace(/\b(?:from|located in|based in)\s+(?:United States|U\.S\.A\.|U\.S\.|USA|Canada|CA)\b/gi, " ")
       .replace(/\b[1-5](?:\.\d)?\s*(?:\/\s*5|stars?|rating)\b/gi, " ")
       .replace(/\b(?:\d+\s+)?(?:day|days|week|weeks|month|months|year|years)\s+ago\b/gi, " ")
-      .replace(/\b(show more|see more|helpful)\b/gi, " ")
+      .replace(/\b(show more|see more|helpful\??|yes|no)\b/gi, " ")
+      .replace(/\b(seller'?s response|seller response)\b/gi, " ")
+      .replace(/(?:usd|eur|gbp|cad|aud|\$|€|£)\s*\d+(?:\.\d{1,2})?\b/gi, " ")
   );
 }
 
@@ -432,7 +435,8 @@ async function collectReviewCandidates(page: Page, maxReviews: number): Promise<
 
 async function parseReviewCandidate(
   candidate: ReviewCandidate,
-  index: number
+  index: number,
+  reviewImageMode: "with_image" | "without_image" = "with_image"
 ): Promise<RawReview | null> {
   const reviewerCountry = candidate.countryHint || (await findCountry(candidate.card, candidate.text));
   if (reviewerCountry) {
@@ -452,11 +456,13 @@ async function parseReviewCandidate(
     candidate.text
   );
   const reviewDate = await findReviewDate(candidate.card, candidate.text);
-  const reviewedImageLink = await extractReviewImage(candidate.card);
+  const reviewedImageLink =
+    reviewImageMode === "without_image" ? "" : await extractReviewImage(candidate.card);
 
   if (!reviewerName || reviewerName.length < 2) return null;
   if (!reviewRating || reviewRating < 1 || reviewRating > 5) return null;
   if (!reviewText || reviewText.length < 10) return null;
+  if (reviewImageMode === "with_image" && !reviewedImageLink) return null;
 
   return {
     reviewerName,
@@ -472,9 +478,10 @@ async function parseReviewCandidate(
 export async function extractReviewsWithStats(
   page: Page,
   maxReviews: number,
-  options?: { offlineHtml?: boolean }
+  options?: ReviewExtractionOptions
 ): Promise<ReviewExtractionResult> {
   if (maxReviews <= 0) maxReviews = 500;
+  const reviewImageMode = options?.reviewImageMode || "with_image";
 
   await scrollToReviews(page);
   await clickLoadMoreReviews(page);
@@ -490,7 +497,7 @@ export async function extractReviewsWithStats(
   for (let i = 0; i < candidates.length; i++) {
     if (raw.length >= maxReviews) break;
     reviewsChecked += 1;
-    const parsed = await parseReviewCandidate(candidates[i], i);
+    const parsed = await parseReviewCandidate(candidates[i], i, reviewImageMode);
     if (parsed) raw.push(parsed);
   }
 
@@ -512,13 +519,17 @@ export async function extractReviewsWithStats(
     if (seen.has(key)) continue;
     seen.add(key);
 
+    const reviewedImageLink =
+      reviewImageMode === "without_image" ? "" : absolutizeUrl(r.reviewedImageLink);
+    if (reviewImageMode === "with_image" && !reviewedImageLink) continue;
+
     reviews.push({
       reviewerName: r.reviewerName.trim(),
       reviewerCountry: country,
       reviewRating: r.reviewRating,
       reviewText: r.reviewText.trim(),
       reviewDate,
-      reviewedImageLink: absolutizeUrl(r.reviewedImageLink),
+      reviewedImageLink,
     });
   }
 
@@ -530,7 +541,7 @@ export async function extractReviewsWithStats(
 export async function extractReviews(
   page: Page,
   maxReviews: number,
-  options?: { offlineHtml?: boolean }
+  options?: ReviewExtractionOptions
 ): Promise<ReviewData[]> {
   const { reviews } = await extractReviewsWithStats(page, maxReviews, options);
   return reviews;

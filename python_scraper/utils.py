@@ -15,9 +15,11 @@ BAD_REVIEWER_NAMES = re.compile(
     re.I,
 )
 DELIVERY_IMAGE = re.compile(
-    r"delivery|attachments|t_delivery|t_smartwm|/image/upload/|cloudinary|fiverr-res|fiverrstatic|review",
+    r"delivery|attachments|attachment|t_delivery|t_smartwm|review",
     re.I,
 )
+GENERIC_FIVERR_IMAGE_HOST = re.compile(r"cloudinary|fiverr-res|fiverrstatic", re.I)
+GIG_IMAGE_MARKER = re.compile(r"/gigs/|t_main|gig_card|gig-card|gig_cards|gig-cards", re.I)
 COUNTRY_IN_TEXT = re.compile(
     r"\b(United States|USA|U\.S\.?|Canada)\b",
     re.I,
@@ -338,11 +340,17 @@ def is_valid_review_image(url: str) -> bool:
     lower = url.lower()
     if not ("fiverr" in lower or "cloudinary" in lower):
         return False
-    if re.search(r"trophy|generic_asset|badge|avatar|profile|seller|\.gif", url, re.I):
+    if re.search(r"trophy|generic_asset|badge|avatar|profile|seller|agency|\.gif", url, re.I):
+        return False
+    if GIG_IMAGE_MARKER.search(url) and not DELIVERY_IMAGE.search(url):
         return False
     if DELIVERY_IMAGE.search(url):
         return True
-    if re.search(r"\.(jpg|jpeg|png|webp)(\?|$)", url, re.I) and "fiverr" in lower:
+    if (
+        GENERIC_FIVERR_IMAGE_HOST.search(url)
+        and re.search(r"\.(jpg|jpeg|png|webp)(\?|$)", url, re.I)
+        and not GIG_IMAGE_MARKER.search(url)
+    ):
         return True
     return False
 

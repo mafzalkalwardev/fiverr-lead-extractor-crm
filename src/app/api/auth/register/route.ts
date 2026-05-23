@@ -7,13 +7,7 @@ import User from "@/models/User";
 /** Public registration disabled — admins create users */
 export async function POST(req: NextRequest) {
   try {
-    const allowPublic = process.env.ALLOW_PUBLIC_REGISTER === "true";
-    if (!allowPublic) {
-      return NextResponse.json(
-        { error: "Registration disabled. Contact FT Solutions admin." },
-        { status: 403 }
-      );
-    }
+    // Public registration enabled for any user
 
     const { name, email, password } = await req.json();
     if (!name || !email || !password) {

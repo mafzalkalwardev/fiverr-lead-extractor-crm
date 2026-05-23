@@ -10,11 +10,13 @@ export interface User {
 }
 
 export type ExtractionMode = "live" | "manual_urls" | "html_import";
+export type ReviewImageMode = "with_image" | "without_image";
 
 export interface ScrapeJob {
   _id: string;
   niche: string;
   extractionMode: ExtractionMode;
+  reviewImageMode?: ReviewImageMode;
   targetCountries: string[];
   maxGigs: number;
   maxReviewsPerGig: number;
@@ -46,6 +48,7 @@ export interface ScrapeJob {
   discoveryPagesScanned?: number;
   discoveryPageLimit?: number;
   activityLog?: string[];
+  skippedExistingGigs?: number;
   createdAt: string;
   updatedAt: string;
   userId?: string;

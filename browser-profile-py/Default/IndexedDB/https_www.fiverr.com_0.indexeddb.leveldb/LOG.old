@@ -1,15 +1,7 @@
-2026/05/23-05:39:53.447 4520 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/MANIFEST-000001
-2026/05/23-05:39:53.448 4520 Recovering log #914
-2026/05/23-05:39:53.448 4520 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/000914.log 
-2026/05/23-05:39:53.449 4520 Delete type=2 #913
-2026/05/23-05:40:22.309 2b98 Level-0 table #919: started
-2026/05/23-05:40:22.326 2b98 Level-0 table #919: 606 bytes OK
-2026/05/23-05:40:22.328 2b98 Delete type=0 #914
-2026/05/23-05:40:22.328 4520 Manual compaction at level-0 from ' }\x01\x00\x00\x00' @ 72057594037927935 : 1 .. ' ~\x01\x00\x00\x00' @ 0 : 0; will stop at ' ~\x01\x00\x00\x05' @ 33881 : 1
-2026/05/23-05:40:22.329 4520 Compacting 1@0 + 1@1 files
-2026/05/23-05:40:22.354 4520 Generated table #920@0: 31 keys, 792 bytes
-2026/05/23-05:40:22.354 4520 Compacted 1@0 + 1@1 files => 792 bytes
-2026/05/23-05:40:22.355 4520 compacted to: files[ 0 1 1 0 0 0 0 ]
-2026/05/23-05:40:22.356 4520 Delete type=2 #919
-2026/05/23-05:40:22.356 4520 Manual compaction at level-0 from ' ~\x01\x00\x00\x05' @ 33881 : 1 .. ' ~\x01\x00\x00\x00' @ 0 : 0; will stop at (end)
-2026/05/23-05:40:22.557 2b98 Manual compaction at level-0 from ' \x7f\x01\x00\x00\x00' @ 72057594037927935 : 1 .. ' \x80\x01\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/05/23-08:42:25.410 5700 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/05/23-08:42:25.411 5700 Recovering log #3
+2026/05/23-08:42:25.413 5700 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\IndexedDB\https_www.fiverr.com_0.indexeddb.leveldb/000003.log 
+2026/05/23-08:42:26.701 5700 Level-0 table #5: started
+2026/05/23-08:42:26.736 5700 Level-0 table #5: 1442 bytes OK
+2026/05/23-08:42:26.739 5700 Delete type=0 #3
+2026/05/23-08:42:26.740 5700 Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)

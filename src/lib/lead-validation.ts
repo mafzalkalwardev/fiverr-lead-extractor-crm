@@ -27,7 +27,7 @@ export function usernameFromGigUrl(url: string): string {
     return "";
   }
 }
-const BAD_REVIEWER = /^(fiverr|seller|buyer|repeat client|seller'?s response|seller response|\d+(\.\d+)?|[1-5](?:\.\d)?)$/i;
+const BAD_REVIEWER = /^(fiverr|seller|buyer|repeat client|seller'?s response|seller response|\d+(\.\d+)?|[1-5](?:\.\d)?\s*(?:stars?|rating|\/\s*5)?)$/i;
 
 function looksLikeRating(value: string): boolean {
   const n = value.trim();
@@ -97,8 +97,9 @@ export function resolveReviewerName(
   if (raw && !looksLikeRating(raw) && !BAD_REVIEWER.test(raw)) return raw;
   return inferReviewerFromText(review.reviewText || "", seller);
 }
-const REVIEW_IMAGE =
-  /delivery|attachments|t_delivery|t_smartwm|\/image\/upload\/|cloudinary|fiverr-res|fiverrstatic|review/i;
+const REVIEW_IMAGE = /delivery|attachments|attachment|t_delivery|t_smartwm|review/i;
+const GENERIC_FIVERR_IMAGE_HOST = /cloudinary|fiverr-res|fiverrstatic/i;
+const GIG_IMAGE_MARKER = /\/gigs\/|t_main|gig_card|gig-card|gig_cards|gig-cards/i;
 
 function isFiverrUrl(value: string): boolean {
   try {
@@ -132,11 +133,16 @@ export function isValidRealLead(gig: GigData, review: ReviewData): boolean {
 
   const img = (review.reviewedImageLink || "").trim();
   if (!img) return true;
-  const lower = img.toLowerCase();
-  if (!img.startsWith("http") || /trophy|generic_asset|avatar|profile|\.gif/i.test(img)) {
+  if (!img.startsWith("http") || /trophy|generic_asset|avatar|profile|seller|agency|\.gif/i.test(img)) {
     return false;
   }
-  if (!REVIEW_IMAGE.test(img) && !(lower.includes("fiverr") && /\.(jpg|jpeg|png|webp)/i.test(img))) {
+  if (GIG_IMAGE_MARKER.test(img) && !REVIEW_IMAGE.test(img)) {
+    return false;
+  }
+  if (
+    !REVIEW_IMAGE.test(img) &&
+    !(GENERIC_FIVERR_IMAGE_HOST.test(img) && /\.(jpg|jpeg|png|webp)/i.test(img) && !GIG_IMAGE_MARKER.test(img))
+  ) {
     return false;
   }
 

@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
-import type { ExtractionMode } from "@/lib/extraction-modes";
+import type { ExtractionMode, ReviewImageMode } from "@/lib/extraction-modes";
 
 export type JobStatus =
   | "pending"
@@ -18,6 +18,7 @@ export interface IScrapeJob extends Document {
   userId: Types.ObjectId;
   niche: string;
   extractionMode: ExtractionMode;
+  reviewImageMode: ReviewImageMode;
   targetCountries: string[];
   maxGigs: number;
   maxReviewsPerGig: number;
@@ -52,6 +53,7 @@ export interface IScrapeJob extends Document {
   discoveryPagesScanned?: number;
   discoveryPageLimit?: number;
   activityLog: string[];
+  skippedExistingGigs: number;
   keyword?: string;
   category?: string;
   createdAt: Date;
@@ -66,6 +68,11 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
       type: String,
       enum: ["live", "manual_urls", "html_import"],
       default: "live",
+    },
+    reviewImageMode: {
+      type: String,
+      enum: ["with_image", "without_image"],
+      default: "with_image",
     },
     targetCountries: { type: [String], default: ["United States", "Canada"] },
     maxGigs: { type: Number, default: 0 },
@@ -122,6 +129,7 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     discoveryPagesScanned: { type: Number, default: 0 },
     discoveryPageLimit: { type: Number, default: 0 },
     activityLog: { type: [String], default: [] },
+    skippedExistingGigs: { type: Number, default: 0 },
     keyword: { type: String, required: false },
     category: { type: String, required: false },
   },

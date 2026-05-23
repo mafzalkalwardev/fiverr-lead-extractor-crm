@@ -1,4 +1,5 @@
 from datetime import timedelta
+import re
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -10,10 +11,12 @@ import config  # noqa: E402 — used for STALE_RUNNING_MINUTES
 from utils import (
     activity_line,
     build_dedupe_key,
+    clean_text,
     is_target_country,
     is_valid_real_lead,
     looks_like_rating,
     normalize_country,
+    normalize_fiverr_url,
     now_utc,
     resolve_reviewer_name,
     seller_name_from_gig,
@@ -48,6 +51,10 @@ def leads_col() -> Collection:
 
 def heartbeat_col() -> Collection:
     return get_db()[config.HEARTBEAT_COLLECTION]
+
+
+def failed_urls_col() -> Collection:
+    return get_db()["failedurls"]
 
 
 def reset_stale_running_jobs() -> int:
@@ -111,9 +118,68 @@ def push_error(job_id: str, message: str) -> None:
     )
 
 
+def record_failed_url(job_id: str, url: str, reason: str) -> None:
+    failed_urls_col().update_one(
+        {"jobId": ObjectId(job_id), "url": url},
+        {
+            "$set": {
+                "reason": reason,
+                "updatedAt": now_utc(),
+            },
+            "$setOnInsert": {
+                "jobId": ObjectId(job_id),
+                "url": url,
+                "retryCount": 0,
+                "createdAt": now_utc(),
+            },
+        },
+        upsert=True,
+    )
+
+
+def mark_failed_url_retry(job_id: str, url: str) -> None:
+    failed_urls_col().update_one(
+        {"jobId": ObjectId(job_id), "url": url},
+        {"$inc": {"retryCount": 1}, "$set": {"updatedAt": now_utc()}},
+        upsert=False,
+    )
+
+
+def clear_failed_url(job_id: str, url: str) -> None:
+    failed_urls_col().delete_one({"jobId": ObjectId(job_id), "url": url})
+
+
+def _niche_regex(niche: str) -> re.Pattern:
+    compact = r"\s+".join(re.escape(part) for part in clean_text(niche).split())
+    return re.compile(rf"^\s*{compact}\s*$", re.I)
+
+
+def previous_gig_urls_for_niche(job: dict, niche: str, current_job_id: str) -> set[str]:
+    """URLs already queued for earlier jobs with the same user + niche."""
+    user_id = job.get("userId")
+    if not user_id or not niche:
+        return set()
+
+    query = {
+        "_id": {"$ne": ObjectId(current_job_id)},
+        "userId": user_id,
+        "niche": _niche_regex(niche),
+    }
+    projection = {"gigQueue": 1, "manualGigUrls": 1}
+    seen: set[str] = set()
+    for doc in jobs_col().find(query, projection):
+        for key in ("gigQueue", "manualGigUrls"):
+            for url in doc.get(key) or []:
+                norm = normalize_fiverr_url(url) or url
+                if norm:
+                    seen.add(norm)
+    return seen
+
+
 def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, str, str]:
     country = normalize_country(review.get("reviewerCountry", ""))
     targets = job.get("targetCountries") or config.DEFAULT_TARGET_COUNTRIES
+    image_mode = job.get("reviewImageMode") or "with_image"
 
     if not country:
         return False, country, "missing_country"
@@ -121,6 +187,10 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         return False, country, "non_target_country"
     if not is_target_country(country, targets):
         return False, country, "non_target_country"
+    if image_mode == "with_image" and not clean_text(review.get("reviewedImageLink")):
+        return False, country, "missing_review_image"
+    if image_mode == "without_image":
+        review = {**review, "reviewedImageLink": ""}
     reviewer_resolved = resolve_reviewer_name(review, gig)
     if not reviewer_resolved:
         return False, country, "invalid_real_lead"

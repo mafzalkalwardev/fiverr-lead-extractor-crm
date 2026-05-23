@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Image as ImageIcon, ImageOff } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,9 @@ import { DEFAULT_TARGET_COUNTRIES, TARGET_COUNTRY_OPTIONS } from "@/lib/constant
 import {
   CLIENT_EXTRACTION_MODES,
   EXTRACTION_MODE_LABELS,
+  REVIEW_IMAGE_MODE_LABELS,
   type ExtractionMode,
+  type ReviewImageMode,
 } from "@/lib/extraction-modes";
 import type { ScrapeJob } from "@/types";
 import { WorkerStatusBanner } from "@/components/worker-status-banner";
@@ -24,6 +27,7 @@ export default function NewJobPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<ExtractionMode>("live");
+  const [reviewImageMode, setReviewImageMode] = useState<ReviewImageMode>("with_image");
   const [niche, setNiche] = useState("Web Development");
   const [manualUrls, setManualUrls] = useState("");
   const [htmlFiles, setHtmlFiles] = useState<FileList | null>(null);
@@ -73,6 +77,7 @@ export default function NewJobPage() {
         fd.append("maxReviewsPerGig", String(form.maxReviewsPerGig));
         fd.append("maxTotalLeads", String(form.maxTotalLeads));
         fd.append("delaySeconds", String(form.delaySeconds));
+        fd.append("reviewImageMode", reviewImageMode);
         for (let i = 0; i < htmlFiles.length; i++) {
           fd.append("htmlFiles", htmlFiles[i]);
         }
@@ -93,6 +98,7 @@ export default function NewJobPage() {
             extractionMode: mode,
             targetCountries: countries,
             manualGigUrls: mode === "manual_urls" ? manualUrls : undefined,
+            reviewImageMode,
             ...form,
             maxGigs: mode === "manual_urls" ? Math.min(form.maxGigs, manualUrls.split(/\n/).length) : form.maxGigs,
           }),
@@ -102,7 +108,10 @@ export default function NewJobPage() {
       const id = data.job?._id || data.jobId;
       if (!id) throw new Error("No job id returned");
 
-      toast({ title: "Job queued", description: `${EXTRACTION_MODE_LABELS[mode]}` });
+      toast({
+        title: "Job queued",
+        description: `${EXTRACTION_MODE_LABELS[mode]} · ${REVIEW_IMAGE_MODE_LABELS[reviewImageMode]}`,
+      });
       router.push(`/jobs/${id}`);
     } catch (err) {
       toast({
@@ -128,9 +137,9 @@ export default function NewJobPage() {
       <div className="mb-4 rounded-md border border-primary/30 bg-primary/10 px-4 py-3 text-sm">
         <p className="font-medium">Automatic Search (recommended)</p>
         <p className="text-muted-foreground mt-1 text-xs">
-          Walks Fiverr search page 1, 2, 3… then opens each gig and saves every US/Canada review that
-          includes a review image. Seller name is taken from the gig URL (e.g. ecomlaunch1). Press
-          &amp; Hold verification is handled automatically in the scraper browser.
+          Walks Fiverr search pages, skips gigs already used for the same niche, then opens each gig
+          and saves US/Canada reviews using the review image option selected below. Press &amp; Hold
+          verification is assisted automatically in the scraper browser.
         </p>
       </div>
 
@@ -168,6 +177,48 @@ export default function NewJobPage() {
                 onChange={(e) => setNiche(e.target.value)}
                 required
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Review Image Option</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setReviewImageMode("with_image")}
+                  className={cn(
+                    "flex min-h-20 items-start gap-3 rounded-lg border p-3 text-left text-sm transition-colors",
+                    reviewImageMode === "with_image"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/40"
+                  )}
+                >
+                  <ImageIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    <span className="block font-medium">With review image link</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Save only US/Canada reviews where a buyer delivery/review image is found.
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReviewImageMode("without_image")}
+                  className={cn(
+                    "flex min-h-20 items-start gap-3 rounded-lg border p-3 text-left text-sm transition-colors",
+                    reviewImageMode === "without_image"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/40"
+                  )}
+                >
+                  <ImageOff className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    <span className="block font-medium">Without review image link</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Faster mode: save US/Canada reviews and leave the review image link empty.
+                    </span>
+                  </span>
+                </button>
+              </div>
             </div>
 
             {mode === "manual_urls" && (
@@ -249,7 +300,7 @@ export default function NewJobPage() {
                     }
                   />
                   <p className="text-xs text-muted-foreground">
-                    Use 0 to extract every US/Canada review with an image on each gig before moving on.
+                    Use 0 to extract every matching US/Canada review on each gig before moving on.
                   </p>
                 </div>
                 <div className="space-y-2">

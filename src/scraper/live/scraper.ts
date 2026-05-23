@@ -3,6 +3,7 @@ import type {
   GigData,
   GigExtractionResult,
   GigSearchResult,
+  ReviewExtractionOptions,
   ReviewData,
   ScraperAdapter,
 } from "../types";
@@ -39,7 +40,11 @@ export class LiveFiverrScraper implements ScraperAdapter {
     return withRetry("search", () => runSearch(page, keyword, maxGigs));
   }
 
-  async processGig(gigUrl: string, maxReviewsPerGig: number): Promise<GigExtractionResult> {
+  async processGig(
+    gigUrl: string,
+    maxReviewsPerGig: number,
+    options?: ReviewExtractionOptions
+  ): Promise<GigExtractionResult> {
     const page = await newLivePage();
     return withRetry(`gig ${gigUrl}`, async () => {
       try {
@@ -53,7 +58,7 @@ export class LiveFiverrScraper implements ScraperAdapter {
           throw new Error(`selectors failed: missing seller at ${gigUrl}`);
         }
 
-        const reviewResult = await extractReviewsWithStats(page, maxReviewsPerGig);
+        const reviewResult = await extractReviewsWithStats(page, maxReviewsPerGig, options);
         return {
           gig,
           reviews: reviewResult.reviews,
@@ -79,10 +84,14 @@ export class LiveFiverrScraper implements ScraperAdapter {
     return this.processGig(gigUrl, 0).then((r) => r.gig);
   }
 
-  async extractReviews(gigUrl: string, maxReviews: number): Promise<ReviewData[]> {
+  async extractReviews(
+    gigUrl: string,
+    maxReviews: number,
+    options?: ReviewExtractionOptions
+  ): Promise<ReviewData[]> {
     const page = await newLivePage();
     await openGigPage(page, gigUrl);
-    return extractReviews(page, maxReviews);
+    return extractReviews(page, maxReviews, options);
   }
 
   async close(force = false): Promise<void> {

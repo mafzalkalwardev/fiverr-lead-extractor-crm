@@ -94,16 +94,12 @@ export async function waitForVerificationToClear(
       continue;
     }
 
-    if (await isGigPageReady(page)) {
-      await ScrapeJob.findByIdAndUpdate(jobId, {
-        status: "extracting_reviews",
-        verificationMessage: "",
-      });
-      await appendJobLog(jobId, "Verification completed. Continuing extraction...");
-      return "cleared";
-    }
-
-    await appendJobLog(jobId, "Verification cleared; waiting for Fiverr gig page to finish loading...");
-    await sleep(2000);
+    // Verification page is gone, captcha solved
+    await ScrapeJob.findByIdAndUpdate(jobId, {
+      status: "extracting_reviews",
+      verificationMessage: "",
+    });
+    await appendJobLog(jobId, "Verification completed. Continuing extraction...");
+    return "cleared";
   }
 }

@@ -13,7 +13,7 @@ import type { ScrapeJob } from "@/types";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { WorkerStatusBanner } from "@/components/worker-status-banner";
 import { useToast } from "@/components/providers/toast-provider";
-import { EXTRACTION_MODE_LABELS } from "@/lib/extraction-modes";
+import { EXTRACTION_MODE_LABELS, REVIEW_IMAGE_MODE_LABELS } from "@/lib/extraction-modes";
 
 export default function JobMonitorPage() {
   const { id } = useParams<{ id: string }>();
@@ -133,6 +133,7 @@ export default function JobMonitorPage() {
           <h1 className="page-title">Job Monitor</h1>
           <p className="text-muted-foreground">
             {job.niche} · {EXTRACTION_MODE_LABELS[job.extractionMode] || job.extractionMode}
+            {job.reviewImageMode ? ` · ${REVIEW_IMAGE_MODE_LABELS[job.reviewImageMode]}` : ""}
           </p>
           <p className="text-sm text-muted-foreground/90">
             {statusHint[job.status] || job.status}
@@ -202,6 +203,7 @@ export default function JobMonitorPage() {
                 </>
               )}
               {job.urlsDiscovered != null && ` · ${job.urlsDiscovered} gigs`}
+              {(job.skippedExistingGigs ?? 0) > 0 && ` · skipped ${job.skippedExistingGigs} already used`}
               {job.discoveryPagesScanned != null && job.discoveryPagesScanned > 0
                 ? ` · ${job.discoveryPagesScanned} pages scanned`
                 : ""}

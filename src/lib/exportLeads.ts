@@ -48,10 +48,18 @@ function usernameFromGigLink(value: string): string {
 function sellerNameForExport(lead: { sellerName?: string; sellerUsername?: string; gigLink?: string }) {
   const username = lead.sellerUsername || usernameFromGigLink(lead.gigLink || "");
   const sellerName = (lead.sellerName || "").trim();
-  if (!sellerName || /^fiverr$/i.test(sellerName) || /^\d+(?:\.\d+)?$/.test(sellerName)) {
+  if (!sellerName || /^(fiverr|seller|contact me)$/i.test(sellerName) || /^\d+(?:\.\d+)?$/.test(sellerName)) {
     return username;
   }
   return sellerName;
+}
+
+function reviewerNameForExport(name: string) {
+  const n = (name || "").trim();
+  if (/^[1-5](?:\.\d)?\s*(?:stars?|rating|\/\s*5)?$/i.test(n) || /^\d+(?:\.\d+)?$/.test(n)) {
+    return "";
+  }
+  return n;
 }
 
 /** Export leads — sheet "Fiverr Leads", full URL text in cells */
@@ -86,7 +94,7 @@ export async function buildLeadsExcel(
       l.gigLink || "",
       l.gigTitle || "",
       l.mainGigImage || "",
-      l.reviewerName || "",
+      reviewerNameForExport(l.reviewerName || ""),
       l.country || "",
       l.review || "",
       Number.isFinite(l.reviewRating) ? l.reviewRating : "",

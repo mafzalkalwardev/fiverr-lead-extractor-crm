@@ -37,11 +37,16 @@ REVIEW_CARD_SELECTORS = [
 ]
 
 BAD_REVIEW_IMAGE = re.compile(
-    r"trophy|generic_asset|avatar|profile|badge|icon|flag|\.gif|/assets/|seller",
+    r"trophy|generic_asset|avatar|profile|badge|icon|flag|\.gif|/assets/|seller|agency",
     re.I,
 )
 REVIEW_IMAGE_HINT = re.compile(
-    r"cloudinary|fiverr-res|fiverrstatic|/image/upload/|attachments|delivery|t_delivery|t_smartwm|review",
+    r"attachments|attachment|delivery|t_delivery|t_smartwm|review",
+    re.I,
+)
+GENERIC_FIVERR_IMAGE_HOST = re.compile(r"cloudinary|fiverr-res|fiverrstatic", re.I)
+GIG_IMAGE_HINT = re.compile(
+    r"/gigs/|t_main|gig_card|gig-card|gig_cards|gig-cards",
     re.I,
 )
 
@@ -424,19 +429,31 @@ async def _review_text(card: Locator, card_text: str, reviewer: str, country: st
     return fallback[:2000] if len(fallback) >= 15 else ""
 
 
-def _score_review_image(url: str) -> int:
+def _strip_image_url(value: str) -> str:
+    return clean_text(value).split("?")[0].rstrip("/")
+
+
+def _score_review_image(url: str, reject_urls: set[str] | None = None) -> int:
     if not url or not url.startswith("http"):
+        return 0
+    if reject_urls and _strip_image_url(url) in reject_urls:
         return 0
     if BAD_REVIEW_IMAGE.search(url):
         return 0
+    if GIG_IMAGE_HINT.search(url) and not REVIEW_IMAGE_HINT.search(url):
+        return 0
     if REVIEW_IMAGE_HINT.search(url):
-        return 3
-    if "fiverr" in url.lower() and re.search(r"\.(jpg|jpeg|png|webp)", url, re.I):
+        return 4
+    if (
+        GENERIC_FIVERR_IMAGE_HOST.search(url)
+        and re.search(r"\.(jpg|jpeg|png|webp)", url, re.I)
+        and not GIG_IMAGE_HINT.search(url)
+    ):
         return 2
     return 0
 
 
-async def _review_delivery_image(card: Locator) -> str:
+async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = None) -> str:
     """Review attachment / delivery image — scroll card into view so lazy images populate."""
     try:
         await card.scroll_into_view_if_needed(timeout=3000)
@@ -453,13 +470,13 @@ async def _review_delivery_image(card: Locator) -> str:
         for attr in ("src", "data-src", "data-lazy-src", "data-original"):
             src = await img.get_attribute(attr) or ""
             full = absolutize_url(src)
-            score = _score_review_image(full)
+            score = _score_review_image(full, reject_urls)
             if score > best_score:
                 best_score = score
                 best = full
         srcset = await img.get_attribute("srcset") or ""
         full = _image_from_srcset(srcset)
-        score = _score_review_image(full)
+        score = _score_review_image(full, reject_urls)
         if score > best_score:
             best_score = score
             best = full
@@ -469,7 +486,7 @@ async def _review_delivery_image(card: Locator) -> str:
         for i in range(min(await links.count(), 8)):
             href = await links.nth(i).get_attribute("href") or ""
             full = absolutize_url(href)
-            score = _score_review_image(full)
+            score = _score_review_image(full, reject_urls)
             if score > best_score:
                 best_score = score
                 best = full
@@ -481,7 +498,7 @@ async def _review_delivery_image(card: Locator) -> str:
         if not match:
             continue
         full = absolutize_url(match.group(1))
-        score = _score_review_image(full)
+        score = _score_review_image(full, reject_urls)
         if score > best_score:
             best_score = score
             best = full
@@ -678,6 +695,8 @@ async def extract_reviews(
     job_id: str,
     seller_username: str = "",
     progress_base: int = 0,
+    review_image_mode: str = "with_image",
+    main_gig_image: str = "",
 ) -> tuple[list[dict], int]:
     """
     Load all review pages on the current gig page, then return US/CA reviews.
@@ -687,8 +706,22 @@ async def extract_reviews(
     if not unlimited and max_reviews < 1:
         max_reviews = 500
 
+    with_images = review_image_mode != "without_image"
+    reject_image_urls = {
+        _strip_image_url(absolutize_url(main_gig_image)),
+    } - {""}
+
     json_reviews = await extract_reviews_from_page_json(page, seller_username)
-    parsed: list[dict] = list(json_reviews)
+    if with_images:
+        parsed: list[dict] = [
+            r
+            for r in json_reviews
+            if is_valid_review_image(absolutize_url(r.get("reviewedImageLink") or ""))
+            and _strip_image_url(absolutize_url(r.get("reviewedImageLink") or ""))
+            not in reject_image_urls
+        ]
+    else:
+        parsed = [{**r, "reviewedImageLink": ""} for r in json_reviews]
     checked = len(json_reviews)
     seen_keys = {
         f"{clean_text(r['reviewerName']).lower()}|{clean_text(r['reviewText'])[:100].lower()}"
@@ -696,7 +729,11 @@ async def extract_reviews(
     }
     seen_text_keys = {clean_text(r["reviewText"])[:140].lower() for r in parsed}
     if json_reviews:
-        append_activity(job_id, f"JSON reviews parsed: {len(json_reviews)} US/CA reviews")
+        mode_note = "with review image links" if with_images else "without review image links"
+        append_activity(
+            job_id,
+            f"JSON reviews parsed: {len(parsed)}/{len(json_reviews)} US/CA reviews ({mode_note})",
+        )
 
     await scroll_to_reviews(page)
     review_page = 1
@@ -756,9 +793,14 @@ async def extract_reviews(
                 append_activity(job_id, f"Review skipped: text too short for reviewer={reviewer}")
                 continue
 
-            image = await _review_delivery_image(card)
-            if image and not is_valid_review_image(image):
-                image = ""
+            image = ""
+            if with_images:
+                image = await _review_delivery_image(card, reject_image_urls)
+                if image and not is_valid_review_image(image):
+                    image = ""
+                if not image:
+                    append_activity(job_id, f"Review skipped: no review image for reviewer={reviewer}")
+                    continue
 
             review_date = await _review_date(card, card_text)
             key = f"{reviewer.strip().lower()}|{text[:100].lower()}"
@@ -780,7 +822,7 @@ async def extract_reviews(
                     "reviewText": text,
                     "reviewRating": rating,
                     "reviewDate": review_date,
-                    "reviewedImageLink": image,
+                    "reviewedImageLink": image if with_images else "",
                     "cardText": card_text,
                     "reviewPage": review_page,
                 }
@@ -814,10 +856,10 @@ async def extract_reviews(
 
     append_activity(
         job_id,
-        f"Reviews on gig: {len(parsed)} US/CA ({checked} reviews scanned, review pages={review_page})",
+        f"Reviews on gig: {len(parsed)} US/CA ({checked} reviews scanned, review pages={review_page}, imageMode={review_image_mode})",
     )
     print(
-        f"[reviews] {len(parsed)} US/CA leads "
+        f"[reviews] {len(parsed)} US/CA leads ({review_image_mode}) "
         f"({checked} cards checked, pages={review_page}, load-more={total_load_clicks})"
     )
     return parsed, checked

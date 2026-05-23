@@ -6,7 +6,7 @@ from playwright.async_api import Page
 
 import config
 from browser import close_extra_pages
-from db import append_activity, update_job
+from db import append_activity, get_job, update_job
 from verification_assist import (
     assist_verification_loop,
     prepare_verification_ui,
@@ -130,7 +130,12 @@ async def try_auto_clear_verification(page: Page, job_id: str = "") -> bool:
 
     for attempt in range(10):
         hold = config.PRESS_HOLD_SECONDS + min(attempt * 0.5, 3)
-        await try_press_and_hold(target, hold_seconds=hold)
+        pressed = await try_press_and_hold(target, hold_seconds=hold)
+        if job_id:
+            append_activity(
+                job_id,
+                f"Auto verification attempt {attempt + 1}/10 {'pressed target' if pressed else 'target not found yet'}",
+            )
         await assist_verification_loop(target, max_attempts=4)
         await asyncio.sleep(1.2)
         if not await is_verification_page(target):
@@ -164,6 +169,11 @@ async def wait_until_verification_clears(
     timeout = config.VERIFICATION_TIMEOUT_SEC
 
     while elapsed < timeout:
+        current = get_job(job_id)
+        if current and current.get("status") == "stopped":
+            append_activity(job_id, "Verification wait stopped by user")
+            return False
+
         challenge_page = await find_context_verification_page(page)
         if not challenge_page and await is_gig_page_visible(page):
             append_activity(job_id, "Verification cleared — continuing")

@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api";
 import type { ScrapeJob } from "@/types";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { formatDate } from "@/lib/utils";
+import { REVIEW_IMAGE_MODE_LABELS } from "@/lib/extraction-modes";
 
 export default function JobsListPage() {
   const [jobs, setJobs] = useState<ScrapeJob[]>([]);
@@ -36,6 +37,7 @@ export default function JobsListPage() {
                 <p>
                   {job.totalLeadsFound} leads (US {job.usLeadsFound} · CA {job.canadaLeadsFound})
                 </p>
+                {job.reviewImageMode && <p>{REVIEW_IMAGE_MODE_LABELS[job.reviewImageMode]}</p>}
                 <p>{formatDate(job.createdAt)}</p>
               </CardContent>
             </Card>

@@ -72,7 +72,7 @@ export async function saveLeadIfQualified(
 
   const sellerUsername = sellerNameFromGig(input.gig);
   const sellerName =
-    input.gig.sellerName && !/^fiverr$/i.test(input.gig.sellerName)
+    input.gig.sellerName && !/^(fiverr|seller|contact me)$/i.test(input.gig.sellerName)
       ? input.gig.sellerName
       : sellerUsername;
   const dedupeKey = buildDedupeKey(

@@ -59,6 +59,7 @@ STALE_RUNNING_MINUTES = int(os.getenv("PYTHON_STALE_JOB_MINUTES", "2"))
 MAX_SEARCH_PAGES = int(os.getenv("MAX_PAGES_LIMIT", "0"))
 MAX_SEARCH_PAGES_SAFETY = int(os.getenv("MAX_SEARCH_PAGES_SAFETY", "100"))
 PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "5"))
+MAX_FAILED_URL_RETRY_PASSES = int(os.getenv("MAX_FAILED_URL_RETRY_PASSES", "1"))
 
 # Safety defaults for client machines: never move/click the real OS mouse unless
 # explicitly enabled. Playwright page mouse stays inside the scraper page.

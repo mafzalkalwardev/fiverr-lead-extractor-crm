@@ -12,6 +12,8 @@ import { apiFetch } from "@/lib/api";
 import type { ScrapeJob, Lead } from "@/types";
 import { useToast } from "@/components/providers/toast-provider";
 
+const ALL_LEADS = "__all__";
+
 function UrlCell({ url }: { url: string }) {
   if (!url) return <span className="text-muted-foreground">—</span>;
   return (
@@ -54,28 +56,27 @@ function LeadsContent() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const [jobs, setJobs] = useState<ScrapeJob[]>([]);
-  const [jobId, setJobId] = useState(searchParams.get("jobId") || "");
+  const [jobId, setJobId] = useState(searchParams?.get("jobId") ?? ALL_LEADS);
   const [leads, setLeads] = useState<Lead[]>([]);
 
   useEffect(() => {
     apiFetch<{ jobs: ScrapeJob[] }>("/api/jobs")
-      .then((d) => {
-        setJobs(d.jobs);
-        if (!jobId && d.jobs[0]) setJobId(d.jobs[0]._id);
-      })
+      .then((d) => setJobs(d.jobs))
       .catch(console.error);
-  }, [jobId]);
+  }, []);
 
   useEffect(() => {
     if (!jobId) return;
-    apiFetch<{ leads: Lead[] }>(`/api/jobs/${jobId}/leads`)
+    const url = jobId === ALL_LEADS ? "/api/leads" : `/api/jobs/${jobId}/leads`;
+    apiFetch<{ leads: Lead[] }>(url)
       .then((d) => setLeads(d.leads))
       .catch(console.error);
   }, [jobId]);
 
   const exportLeads = async () => {
     const token = localStorage.getItem("token");
-    const res = await fetch(`/api/jobs/${jobId}/export`, {
+    const url = jobId === ALL_LEADS ? "/api/leads/export" : `/api/jobs/${jobId}/export`;
+    const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
@@ -85,7 +86,7 @@ function LeadsContent() {
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `fiverr-leads-export.xlsx`;
+    a.download = jobId === ALL_LEADS ? "fiverr-leads-all.xlsx" : "fiverr-leads-export.xlsx";
     a.click();
     toast({ title: "Leads exported" });
   };
@@ -96,6 +97,7 @@ function LeadsContent() {
         <div className="space-y-2 min-w-[200px]">
           <Label>Job</Label>
           <Select value={jobId} onChange={(e) => setJobId(e.target.value)}>
+            <option value={ALL_LEADS}>All leads</option>
             {jobs.map((j) => (
               <option key={j._id} value={j._id}>
                 {j.niche} — {j.status} ({j.totalLeadsFound} leads)

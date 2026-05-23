@@ -155,15 +155,20 @@ def _niche_regex(niche: str) -> re.Pattern:
 
 
 def previous_gig_urls_for_niche(job: dict, niche: str, current_job_id: str) -> set[str]:
-    """URLs already queued for earlier jobs with the same user + niche."""
+    """URLs already queued or scraped for earlier jobs with the same user + niche."""
     user_id = job.get("userId")
     if not user_id or not niche:
         return set()
 
+    niche_match = _niche_regex(niche)
     query = {
         "_id": {"$ne": ObjectId(current_job_id)},
         "userId": user_id,
-        "niche": _niche_regex(niche),
+        "$or": [
+            {"niche": niche_match},
+            {"keyword": niche_match},
+            {"category": niche_match},
+        ],
     }
     projection = {"gigQueue": 1, "manualGigUrls": 1}
     seen: set[str] = set()
@@ -173,6 +178,16 @@ def previous_gig_urls_for_niche(job: dict, niche: str, current_job_id: str) -> s
                 norm = normalize_fiverr_url(url) or url
                 if norm:
                     seen.add(norm)
+
+    lead_query = {
+        "userId": user_id,
+        "serviceNiche": niche_match,
+    }
+    for url in leads_col().distinct("gigLink", lead_query):
+        norm = normalize_fiverr_url(url) or url
+        if norm:
+            seen.add(norm)
+
     return seen
 
 

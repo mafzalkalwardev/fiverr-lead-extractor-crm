@@ -477,7 +477,7 @@ async def process_job(job: dict) -> None:
             if seen_before:
                 append_activity(
                     job_id,
-                    f"Resume-by-keyword: skipping {len(seen_before)} gig(s) already queued for this niche",
+                    f"Keyword continuation: skipping {len(seen_before)} gig(s) already scraped or queued for this niche",
                 )
             update_job(job_id, {"currentSearchPage": 0, "discoveryPagesScanned": 0})
             urls, source = await discover_gig_urls(

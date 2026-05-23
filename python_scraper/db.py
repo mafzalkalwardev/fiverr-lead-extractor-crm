@@ -117,6 +117,8 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
 
     if not country:
         return False, country, "missing_country"
+    if country not in ("United States", "Canada"):
+        return False, country, "non_target_country"
     if not is_target_country(country, targets):
         return False, country, "non_target_country"
     reviewer_resolved = resolve_reviewer_name(review, gig)
@@ -127,9 +129,17 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
     if not is_valid_real_lead(gig, review):
         return False, country, "invalid_real_lead"
 
-    seller_name = seller_name_from_gig(gig)
-    if not seller_name:
+    seller_username = seller_name_from_gig(gig)
+    if not seller_username:
         return False, country, "invalid_seller"
+    seller_name = (
+        gig.get("sellerDisplayName")
+        or gig.get("sellerName")
+        or seller_username
+    )
+    seller_name = str(seller_name).strip()
+    if not seller_name or seller_name.lower() == "fiverr" or looks_like_rating(seller_name):
+        seller_name = seller_username
     dedupe_key = build_dedupe_key(
         gig["gigUrl"],
         review["reviewerName"],
@@ -140,6 +150,7 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         "jobId": job["_id"],
         "userId": job["userId"],
         "sellerName": seller_name,
+        "sellerUsername": seller_username,
         "gigLink": gig["gigUrl"].strip(),
         "gigTitle": gig.get("gigTitle", "").strip(),
         "reviewerName": review["reviewerName"].strip(),
@@ -177,6 +188,7 @@ def refresh_job_counters(job_id: str, state: dict) -> None:
             "totalLeadsFound": total,
             "failedGigs": state["failed_gigs"],
             "resumeIndex": idx,
+            "totalReviewsParsed": state["reviews_checked"],
             "progressPercent": int((idx / queue_len) * 100),
         },
     )

@@ -4,6 +4,7 @@ export interface ILead extends Document {
   jobId: Types.ObjectId;
   userId: Types.ObjectId;
   sellerName: string;
+  sellerUsername: string;
   gigLink: string;
   gigTitle: string;
   reviewerName: string;
@@ -23,6 +24,7 @@ const LeadSchema = new Schema<ILead>(
     jobId: { type: Schema.Types.ObjectId, ref: "ScrapeJob", required: true, index: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     sellerName: { type: String, default: "" },
+    sellerUsername: { type: String, default: "" },
     gigLink: { type: String, required: true },
     gigTitle: { type: String, default: "" },
     reviewerName: { type: String, default: "" },

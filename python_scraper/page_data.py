@@ -16,178 +16,245 @@ from utils import (
     infer_reviewer_from_text,
     is_valid_review_image,
     is_valid_reviewer_name,
+    is_valid_seller_name,
     looks_like_rating,
     normalize_country,
+    parse_review_date,
     reviewer_name_before_country,
     seller_name_from_gig,
     username_from_gig_url,
 )
 
-_EXTRACT_PAGE_JSON_JS = r"""
-() => {
-  const blobs = [];
-  const push = (raw) => {
-    if (!raw || raw.length < 20) return;
-    try {
-      blobs.push(JSON.parse(raw));
-    } catch (_) {}
-  };
+JSON_SCRIPT_SELECTORS = [
+    "#__NEXT_DATA__",
+    'script[type="application/json"]',
+    'script[id*="perseus" i]',
+    'script[type="application/ld+json"]',
+]
 
-  const nd = document.querySelector("#__NEXT_DATA__");
-  if (nd && nd.textContent) push(nd.textContent);
 
-  for (const s of document.querySelectorAll('script[type="application/json"], script[id*="perseus" i]')) {
-    const t = s.textContent || "";
-    if (t.length > 100) push(t);
-  }
+async def _extract_page_json_blobs(page: Page) -> list[Any]:
+    blobs: list[Any] = []
+    seen: set[str] = set()
 
-  for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
-    const t = s.textContent || "";
-    if (t.length > 20) push(t);
-  }
+    for selector in JSON_SCRIPT_SELECTORS:
+        loc = page.locator(selector)
+        try:
+            count = min(await loc.count(), 80)
+        except Exception:
+            continue
+        for i in range(count):
+            try:
+                raw = await loc.nth(i).text_content(timeout=1200)
+            except Exception:
+                continue
+            if not raw or len(raw) < 20:
+                continue
+            key = raw[:200]
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                blobs.append(json.loads(raw))
+            except Exception:
+                continue
 
-  return blobs;
-}
-"""
+    return blobs
 
-_WALK_REVIEW_JS = r"""
-(blobs, sellerSlug) => {
-  const seen = new Set();
-  const out = [];
-  const sellerL = (sellerSlug || "").toLowerCase();
-  const isRating = (t) => /^[1-5](?:\.\d)?$/.test(t) || /^\d+(?:\.\d+)?$/.test(t);
-  const slugKey = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-  const normCountry = (v) => {
-    const t = String(v || "");
-    if (/united states|usa|u\.s\./i.test(t) || t === "US") return "United States";
-    if (/canada/i.test(t) || t === "CA") return "Canada";
-    return "";
-  };
+def _slug_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", clean_text(value).lower())
 
-  const pickBuyer = (o) => {
-    const keys = ["username", "userName", "buyerUsername", "reviewerUsername", "authorUsername", "name", "displayName"];
-    for (const k of keys) {
-      const v = o[k];
-      if (typeof v === "string" && v.length >= 2 && !isRating(v)) {
-        const sk = slugKey(v);
-        if (sellerL && sk === slugKey(sellerL)) continue;
-        return v.replace(/^@/, "").trim();
-      }
-    }
-    if (o.user && typeof o.user === "object") {
-      for (const k of ["username", "name", "displayName"]) {
-        const v = o.user[k];
-        if (typeof v === "string" && v.length >= 2 && !isRating(v)) {
-          const sk = slugKey(v);
-          if (sellerL && sk === slugKey(sellerL)) continue;
-          return v.replace(/^@/, "").trim();
-        }
-      }
-    }
-    if (o.buyer && typeof o.buyer === "object") {
-      for (const k of ["username", "name", "displayName"]) {
-        const v = o.buyer[k];
-        if (typeof v === "string" && v.length >= 2 && !isRating(v)) return v.replace(/^@/, "").trim();
-      }
-    }
-    return "";
-  };
 
-  const pickText = (o) => {
-    for (const k of ["comment", "reviewText", "description", "text", "message", "content", "body"]) {
-      const v = o[k];
-      if (typeof v === "string" && v.length >= 15) return v.trim();
-    }
-    return "";
-  };
+def _is_seller_name(value: str, seller_slug: str) -> bool:
+    return bool(seller_slug and _slug_key(value) == _slug_key(seller_slug))
 
-  const pickRating = (o) => {
-    for (const k of ["rating", "value", "stars", "score", "ratingScore"]) {
-      const v = o[k];
-      if (typeof v === "number" && v >= 1 && v <= 5) return v;
-      if (typeof v === "string" && /^[1-5](?:\.\d)?$/.test(v)) return parseFloat(v);
-    }
-    return 5;
-  };
 
-  const pickCountry = (o) => {
-    for (const k of ["country", "countryCode", "location", "reviewerCountry"]) {
-      const c = normCountry(o[k]);
-      if (c) return c;
-    }
-    if (o.user && typeof o.user === "object") {
-      const c = normCountry(o.user.country || o.user.countryCode);
-      if (c) return c;
-    }
-    return "";
-  };
+def _field_text(obj: dict[str, Any], keys: list[str]) -> str:
+    for key in keys:
+        value = obj.get(key)
+        if isinstance(value, str):
+            text = clean_text(value).lstrip("@")
+            if text:
+                return text
+        if isinstance(value, (int, float)):
+            return clean_text(value)
+    return ""
 
-  const pickImage = (o) => {
-    for (const k of ["reviewedImage", "attachment", "image", "deliveryImage", "url", "src"]) {
-      const v = o[k];
-      if (typeof v === "string" && v.startsWith("http")) return v;
-      if (v && typeof v === "object" && typeof v.url === "string") return v.url;
-    }
-    if (Array.isArray(o.attachments)) {
-      for (const a of o.attachments) {
-        if (a && typeof a.url === "string") return a.url;
-        if (typeof a === "string" && a.startsWith("http")) return a;
-      }
-    }
-    return "";
-  };
 
-  const tryReview = (o) => {
-    if (!o || typeof o !== "object") return;
-    const text = pickText(o);
-    if (text.length < 15) return;
-    const buyer = pickBuyer(o);
-    if (!buyer || isRating(buyer)) return;
-    const country = pickCountry(o);
-    if (!country) return;
-    const img = pickImage(o);
-    const rating = pickRating(o);
-    const key = buyer + "|" + text.slice(0, 60).toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({
-      reviewerName: buyer,
-      reviewerCountry: country,
-      reviewText: text.slice(0, 2000),
-      reviewRating: rating,
-      reviewedImageLink: img || "",
-    });
-  };
+def _pick_buyer(obj: dict[str, Any], seller_slug: str) -> str:
+    keys = [
+        "buyerUsername",
+        "reviewerUsername",
+        "authorUsername",
+        "username",
+        "userName",
+        "displayName",
+        "name",
+    ]
+    name = _field_text(obj, keys)
+    if (
+        name
+        and not looks_like_rating(name)
+        and not _is_seller_name(name, seller_slug)
+        and is_valid_reviewer_name(name)
+    ):
+        return name
 
-  const walk = (node, depth) => {
-    if (!node || depth > 14) return;
-    if (Array.isArray(node)) {
-      for (const item of node) walk(item, depth + 1);
-      return;
-    }
-    if (typeof node !== "object") return;
+    for nested_key in ("buyer", "reviewer", "author", "user"):
+        nested = obj.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        name = _field_text(nested, keys)
+        if (
+            name
+            and not looks_like_rating(name)
+            and not _is_seller_name(name, seller_slug)
+            and is_valid_reviewer_name(name)
+        ):
+            return name
+    return ""
 
-    tryReview(node);
 
-    for (const k of ["reviews", "buyerReviews", "gigReviews", "userReviews", "items", "nodes", "data", "list"]) {
-      const v = node[k];
-      if (Array.isArray(v)) {
-        for (const item of v) tryReview(item);
-      }
-    }
+def _pick_text(obj: dict[str, Any]) -> str:
+    for key in (
+        "comment",
+        "commentText",
+        "reviewText",
+        "description",
+        "text",
+        "message",
+        "content",
+        "body",
+    ):
+        value = obj.get(key)
+        if isinstance(value, str):
+            text = clean_text(value)
+            if len(text) >= 15:
+                return text
+    return ""
 
-    for (const v of Object.values(node)) {
-      if (v && typeof v === "object") walk(v, depth + 1);
-    }
-  };
 
-  for (const blob of blobs || []) {
-    walk(blob, 0);
-  }
-  return out;
-}
-"""
+def _pick_rating(obj: dict[str, Any]) -> float:
+    for key in ("rating", "value", "stars", "score", "ratingScore", "reviewRating"):
+        value = obj.get(key)
+        try:
+            rating = float(value)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= rating <= 5:
+            return rating
+    return 5.0
+
+
+def _pick_country(obj: dict[str, Any]) -> str:
+    for key in ("country", "countryCode", "location", "reviewerCountry"):
+        country = normalize_country(clean_text(obj.get(key)))
+        if country in ("United States", "Canada"):
+            return country
+
+    for nested_key in ("buyer", "reviewer", "author", "user"):
+        nested = obj.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        country = _pick_country(nested)
+        if country:
+            return country
+    return ""
+
+
+def _pick_image(obj: dict[str, Any]) -> str:
+    for key in ("reviewedImage", "attachment", "image", "deliveryImage", "url", "src"):
+        value = obj.get(key)
+        if isinstance(value, str) and value.startswith(("http", "//", "/")):
+            return value
+        if isinstance(value, dict):
+            nested = _pick_image(value)
+            if nested:
+                return nested
+
+    attachments = obj.get("attachments") or obj.get("media") or obj.get("images")
+    if isinstance(attachments, list):
+        for item in attachments:
+            if isinstance(item, str) and item.startswith(("http", "//", "/")):
+                return item
+            if isinstance(item, dict):
+                nested = _pick_image(item)
+                if nested:
+                    return nested
+    return ""
+
+
+def _pick_date(obj: dict[str, Any]):
+    for key in (
+        "reviewDate",
+        "createdAt",
+        "created_at",
+        "updatedAt",
+        "date",
+        "time",
+        "reviewedAt",
+    ):
+        parsed = parse_review_date(obj.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _walk_reviews(blobs: list[Any], seller_slug: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def try_review(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        text = _pick_text(node)
+        if len(text) < 15:
+            return
+        buyer = _pick_buyer(node, seller_slug)
+        if not buyer:
+            return
+        country = _pick_country(node)
+        if country not in ("United States", "Canada"):
+            return
+        key = f"{_slug_key(buyer)}|{text[:90].lower()}"
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(
+            {
+                "reviewerName": buyer,
+                "reviewerCountry": country,
+                "reviewText": text[:2000],
+                "reviewRating": _pick_rating(node),
+                "reviewDate": _pick_date(node),
+                "reviewedImageLink": _pick_image(node),
+            }
+        )
+
+    def walk(node: Any, depth: int = 0) -> None:
+        if depth > 14:
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+
+        try_review(node)
+        for key in ("reviews", "buyerReviews", "gigReviews", "userReviews", "items", "nodes", "data", "list"):
+            value = node.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    try_review(item)
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                walk(value, depth + 1)
+
+    for blob in blobs:
+        walk(blob)
+    return out
 
 
 def _pick_seller_from_json(blobs: list[Any], gig_url: str) -> dict[str, str]:
@@ -204,6 +271,18 @@ def _pick_seller_from_json(blobs: list[Any], gig_url: str) -> dict[str, str]:
                         pass
                     elif not slug:
                         slug = u
+                for key in ("displayName", "name", "fullName", "sellerName"):
+                    value = node.get(key)
+                    if not isinstance(value, str):
+                        continue
+                    name = clean_text(value).lstrip("@")
+                    if (
+                        not display
+                        and slug
+                        and is_valid_seller_name(name, slug, "")
+                        and name.lower() != "fiverr"
+                    ):
+                        display = name
                 for k in ("seller", "user", "owner", "gig", "gigData", "sellerData"):
                     v = node.get(k)
                     if isinstance(v, dict):
@@ -215,17 +294,21 @@ def _pick_seller_from_json(blobs: list[Any], gig_url: str) -> dict[str, str]:
                 stack.extend(node)
     if not slug:
         slug = username_from_gig_url(gig_url)
-    return {"sellerUsername": slug, "sellerName": slug}
+    return {
+        "sellerUsername": slug,
+        "sellerDisplayName": display or slug,
+        "sellerName": display or slug,
+    }
 
 
 async def extract_reviews_from_page_json(
     page: Page, seller_username: str
 ) -> list[dict[str, Any]]:
     try:
-        blobs = await page.evaluate(_EXTRACT_PAGE_JSON_JS)
+        blobs = await _extract_page_json_blobs(page)
         if not blobs:
             return []
-        raw = await page.evaluate(_WALK_REVIEW_JS, blobs, seller_username or "")
+        raw = _walk_reviews(blobs, seller_username or "")
     except Exception as err:
         print(f"[page_data] JSON review extract failed: {err}")
         return []
@@ -265,7 +348,7 @@ async def extract_reviews_from_page_json(
                 "reviewerCountry": country,
                 "reviewText": text,
                 "reviewRating": rating,
-                "reviewDate": None,
+                "reviewDate": item.get("reviewDate"),
                 "reviewedImageLink": img,
             }
         )
@@ -278,14 +361,21 @@ async def extract_reviews_from_page_json(
 async def enrich_gig_from_page_json(page: Page, gig: dict) -> dict:
     """Ensure seller fields always match gig URL / embedded JSON — never 'Fiverr'."""
     slug = seller_name_from_gig(gig) or username_from_gig_url(page.url)
+    current_display = clean_text(gig.get("sellerDisplayName") or gig.get("sellerName") or "")
     if slug:
         gig["sellerUsername"] = slug
-        gig["sellerName"] = slug
-        return gig
+        if current_display and is_valid_seller_name(
+            current_display,
+            slug,
+            gig.get("gigTitle", ""),
+        ):
+            gig["sellerDisplayName"] = current_display
+            gig["sellerName"] = current_display
+            return gig
     url = gig.get("gigUrl") or page.url
 
     try:
-        blobs = await page.evaluate(_EXTRACT_PAGE_JSON_JS)
+        blobs = await _extract_page_json_blobs(page)
         if blobs:
             picked = _pick_seller_from_json(blobs, url)
             if picked.get("sellerUsername"):
@@ -296,5 +386,9 @@ async def enrich_gig_from_page_json(page: Page, gig: dict) -> dict:
     slug = username_from_gig_url(url)
     if slug:
         gig["sellerUsername"] = slug
-        gig["sellerName"] = slug
+        display = clean_text(gig.get("sellerDisplayName") or gig.get("sellerName") or "")
+        if not display or not is_valid_seller_name(display, slug, gig.get("gigTitle", "")):
+            display = slug
+        gig["sellerDisplayName"] = display
+        gig["sellerName"] = display
     return gig

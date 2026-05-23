@@ -48,6 +48,7 @@ async function finishJob(
       progressPercent: 100,
       currentGigLink: "",
       currentSeller: "",
+      currentSellerUsername: "",
       verificationMessage: "",
     });
     await appendJobLog(jobId, `Job completed | totalLeads=${totalLeads}`);

@@ -10,6 +10,7 @@ export interface GigData {
   gigTitle: string;
   sellerName: string;
   sellerUsername: string;
+  sellerDisplayName?: string;
   mainGigImage: string;
   sellerLevel?: string;
   sellerRating?: number;

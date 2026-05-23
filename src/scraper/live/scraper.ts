@@ -53,10 +53,7 @@ export class LiveFiverrScraper implements ScraperAdapter {
           throw new Error(`selectors failed: missing seller at ${gigUrl}`);
         }
 
-        const reviewResult =
-          maxReviewsPerGig > 0
-            ? await extractReviewsWithStats(page, maxReviewsPerGig)
-            : { reviews: [], reviewsChecked: 0 };
+        const reviewResult = await extractReviewsWithStats(page, maxReviewsPerGig);
         return {
           gig,
           reviews: reviewResult.reviews,

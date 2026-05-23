@@ -243,6 +243,21 @@ export default function JobMonitorPage() {
                 </div>
               )}
               <div>
+                <p className="text-muted-foreground">Current gig</p>
+                <p className="text-xl font-bold">
+                  {job.currentGigNumber || job.resumeIndex || 0}
+                  {job.totalGigs || job.gigQueue?.length ? ` / ${job.totalGigs || job.gigQueue?.length}` : ""}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Review page</p>
+                <p className="text-xl font-bold">{job.currentReviewPage || 0}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Reviews parsed</p>
+                <p className="text-xl font-bold">{job.totalReviewsParsed ?? job.reviewsChecked}</p>
+              </div>
+              <div>
                 <p className="text-muted-foreground">Gigs scanned</p>
                 <p className="text-xl font-bold">{job.gigsScanned}</p>
               </div>
@@ -271,6 +286,12 @@ export default function JobMonitorPage() {
               <p className="text-sm">
                 <span className="text-muted-foreground">Current seller: </span>
                 {job.currentSeller}
+              </p>
+            )}
+            {job.currentSellerUsername && (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Seller username: </span>
+                {job.currentSellerUsername}
               </p>
             )}
             {job.currentGigLink && (

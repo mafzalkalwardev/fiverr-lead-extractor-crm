@@ -23,6 +23,11 @@ export interface ScrapeJob {
   status: string;
   currentGigLink: string;
   currentSeller: string;
+  currentSellerUsername?: string;
+  currentGigNumber?: number;
+  totalGigs?: number;
+  currentReviewPage?: number;
+  totalReviewsParsed?: number;
   gigsScanned: number;
   reviewsChecked: number;
   usLeadsFound: number;
@@ -49,6 +54,7 @@ export interface ScrapeJob {
 export interface Lead {
   _id: string;
   sellerName: string;
+  sellerUsername: string;
   gigLink: string;
   gigTitle: string;
   reviewerName: string;

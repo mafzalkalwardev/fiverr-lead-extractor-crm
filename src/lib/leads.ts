@@ -55,6 +55,10 @@ export async function saveLeadIfQualified(
     return { saved: false, country, reason: "missing_country" };
   }
 
+  if (country !== "United States" && country !== "Canada") {
+    return { saved: false, country, reason: "non_target_country" };
+  }
+
   if (!isTargetCountry(country, targetCountries)) {
     return { saved: false, country, reason: "non_target_country" };
   }
@@ -66,7 +70,11 @@ export async function saveLeadIfQualified(
     return { saved: false, country, reason: "invalid_real_lead" };
   }
 
-  const sellerName = sellerNameFromGig(input.gig);
+  const sellerUsername = sellerNameFromGig(input.gig);
+  const sellerName =
+    input.gig.sellerName && !/^fiverr$/i.test(input.gig.sellerName)
+      ? input.gig.sellerName
+      : sellerUsername;
   const dedupeKey = buildDedupeKey(
     input.gig.gigUrl,
     reviewerName.trim(),
@@ -78,6 +86,7 @@ export async function saveLeadIfQualified(
       jobId: input.jobId,
       userId: input.userId,
       sellerName,
+      sellerUsername,
       gigLink: input.gig.gigUrl.trim(),
       gigTitle: input.gig.gigTitle.trim(),
       reviewerName: reviewerName.trim(),

@@ -1,6 +1,45 @@
-2026/05/22-15:07:15.590 2360 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/MANIFEST-000001
-2026/05/22-15:07:15.608 2360 Recovering log #3
-2026/05/22-15:07:15.613 2360 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/000003.log 
-2026/05/22-15:09:20.803 2360 Level-0 table #5: started
-2026/05/22-15:09:20.815 2360 Level-0 table #5: 23631 bytes OK
-2026/05/22-15:09:20.818 2360 Delete type=0 #3
+2026/05/22-16:25:50.839 279c Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/MANIFEST-000001
+2026/05/22-16:25:50.854 279c Recovering log #10
+2026/05/22-16:25:50.860 279c Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Local Storage\leveldb/000010.log 
+2026/05/22-16:27:52.564 2294 Level-0 table #14: started
+2026/05/22-16:27:52.574 2294 Level-0 table #14: 20187 bytes OK
+2026/05/22-16:27:52.577 2294 Delete type=0 #10
+2026/05/22-16:33:52.614 2294 Level-0 table #16: started
+2026/05/22-16:33:52.627 2294 Level-0 table #16: 16999 bytes OK
+2026/05/22-16:33:52.635 2294 Delete type=0 #13
+2026/05/22-16:38:52.569 2294 Level-0 table #18: started
+2026/05/22-16:38:52.590 2294 Level-0 table #18: 14535 bytes OK
+2026/05/22-16:38:52.597 2294 Delete type=0 #15
+2026/05/22-16:38:52.599 2294 Compacting 4@0 + 1@1 files
+2026/05/22-16:38:52.642 2294 Generated table #19@0: 1346 keys, 29523 bytes
+2026/05/22-16:38:52.642 2294 Compacted 4@0 + 1@1 files => 29523 bytes
+2026/05/22-16:38:52.646 2294 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/05/22-16:38:52.653 2294 Delete type=2 #8
+2026/05/22-16:38:52.653 2294 Delete type=2 #11
+2026/05/22-16:38:52.654 2294 Delete type=2 #14
+2026/05/22-16:38:52.654 2294 Delete type=2 #16
+2026/05/22-16:38:52.654 2294 Delete type=2 #18
+2026/05/22-16:43:52.561 279c Level-0 table #21: started
+2026/05/22-16:43:52.569 279c Level-0 table #21: 17000 bytes OK
+2026/05/22-16:43:52.572 279c Delete type=0 #17
+2026/05/22-16:48:52.576 2294 Level-0 table #23: started
+2026/05/22-16:48:52.618 2294 Level-0 table #23: 23064 bytes OK
+2026/05/22-16:48:52.629 2294 Delete type=0 #20
+2026/05/22-16:53:52.575 2294 Level-0 table #25: started
+2026/05/22-16:53:52.596 2294 Level-0 table #25: 16477 bytes OK
+2026/05/22-16:53:52.601 2294 Delete type=0 #22
+2026/05/22-16:57:52.602 2294 Level-0 table #27: started
+2026/05/22-16:57:52.645 2294 Level-0 table #27: 15764 bytes OK
+2026/05/22-16:57:52.706 2294 Delete type=0 #24
+2026/05/22-16:57:52.715 2294 Compacting 4@0 + 1@1 files
+2026/05/22-16:57:52.775 2294 Generated table #28@0: 2884 keys, 51762 bytes
+2026/05/22-16:57:52.775 2294 Compacted 4@0 + 1@1 files => 51762 bytes
+2026/05/22-16:57:52.781 2294 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/05/22-16:57:52.789 2294 Delete type=2 #19
+2026/05/22-16:57:52.793 2294 Delete type=2 #21
+2026/05/22-16:57:52.797 2294 Delete type=2 #23
+2026/05/22-16:57:52.802 2294 Delete type=2 #25
+2026/05/22-16:57:52.803 2294 Delete type=2 #27
+2026/05/22-17:01:52.577 2294 Level-0 table #30: started
+2026/05/22-17:01:52.601 2294 Level-0 table #30: 21949 bytes OK
+2026/05/22-17:01:52.605 2294 Delete type=0 #26

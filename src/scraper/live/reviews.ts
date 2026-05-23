@@ -474,7 +474,7 @@ export async function extractReviewsWithStats(
   maxReviews: number,
   options?: { offlineHtml?: boolean }
 ): Promise<ReviewExtractionResult> {
-  if (maxReviews <= 0) return { reviews: [], reviewsChecked: 0 };
+  if (maxReviews <= 0) maxReviews = 500;
 
   await scrollToReviews(page);
   await clickLoadMoreReviews(page);

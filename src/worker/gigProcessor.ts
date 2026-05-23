@@ -97,6 +97,9 @@ export async function processGigList(
     await ScrapeJob.findByIdAndUpdate(jobId, {
       status: "extracting_reviews",
       currentGigLink: gigUrl,
+      currentGigNumber: i + 1,
+      totalGigs: gigUrls.length,
+      currentReviewPage: 0,
       resumeIndex: i,
       gigQueue: gigUrls,
       progressPercent: Math.round((i / totalSteps) * 100),
@@ -116,6 +119,9 @@ export async function processGigList(
       await ScrapeJob.findByIdAndUpdate(jobId, {
         currentGigLink: gig.gigUrl,
         currentSeller: seller,
+        currentSellerUsername: gig.sellerUsername || seller,
+        currentReviewPage: reviews.length ? 1 : 0,
+        totalReviewsParsed: state.reviewsChecked + (reviewsChecked ?? reviews.length),
       });
       await appendJobLog(
         jobId,
@@ -169,6 +175,7 @@ export async function processGigList(
         usLeadsFound: state.usLeads,
         canadaLeadsFound: state.canadaLeads,
         totalLeadsFound: state.totalLeads,
+        totalReviewsParsed: state.reviewsChecked,
         resumeIndex: i + 1,
       });
       console.log(`[worker] Leads saved count for gig: ${savedForGig}`);

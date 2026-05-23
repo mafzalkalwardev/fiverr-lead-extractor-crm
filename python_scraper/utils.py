@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 
@@ -10,7 +10,8 @@ BAD_SELLER_NAMES = re.compile(
     re.I,
 )
 BAD_REVIEWER_NAMES = re.compile(
-    r"^(fiverr|seller|buyer|reviews?|show more|see more|helpful|customer|anonymous|\d+(\.\d+)?)$",
+    r"^(fiverr|seller|buyer|reviews?|show more|see more|helpful|customer|anonymous|"
+    r"repeat client|seller'?s response|seller response|price|duration|\d+(\.\d+)?)$",
     re.I,
 )
 DELIVERY_IMAGE = re.compile(
@@ -195,6 +196,7 @@ def reviewer_name_before_country(text: str) -> str:
         return ""
 
     before = raw[: m.start()].strip()
+    before = re.sub(r"\brepeat client\b", " ", before, flags=re.I)
     before = re.sub(r"^[1-5](?:\.\d)?\s*", "", before).strip()
     before = re.sub(
         r"\b\d+\s+(?:day|days|week|weeks|month|months|year|years)\s+ago\b",
@@ -213,6 +215,7 @@ def reviewer_name_before_country(text: str) -> str:
 
     for cand in candidates:
         name = clean_text(cand).lstrip("@").rstrip(".")
+        name = re.sub(r"^[A-Z]\s+(?=[A-Za-z0-9_'.-]{2,})", "", name).strip()
         if name and not looks_like_rating(name) and is_valid_reviewer_name(name):
             return name
     return ""
@@ -235,6 +238,54 @@ def parse_rating_after_country(text: str) -> float:
         if 1 <= v <= 5:
             return v
     return 5.0
+
+
+def parse_review_date(value: object):
+    """Parse Fiverr absolute/relative review dates when available."""
+    raw = clean_text(value)
+    if not raw:
+        return None
+
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except Exception:
+        pass
+
+    for fmt in ("%b %d, %Y", "%B %d, %Y", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    lowered = raw.lower()
+    if re.search(r"\bjust now|today\b", lowered):
+        return now_utc()
+    if re.search(r"\byesterday\b", lowered):
+        return now_utc() - timedelta(days=1)
+
+    m = re.search(
+        r"\b(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago\b",
+        lowered,
+    )
+    if not m:
+        return None
+
+    amount = int(m.group(1))
+    unit = m.group(2)
+    days_by_unit = {
+        "minute": 0,
+        "hour": 0,
+        "day": 1,
+        "week": 7,
+        "month": 30,
+        "year": 365,
+    }
+    if unit == "minute":
+        return now_utc() - timedelta(minutes=amount)
+    if unit == "hour":
+        return now_utc() - timedelta(hours=amount)
+    return now_utc() - timedelta(days=amount * days_by_unit[unit])
 
 
 def resolve_reviewer_name(review: dict, gig: dict) -> str:
@@ -320,7 +371,7 @@ def is_valid_real_lead(gig: dict, review: dict) -> bool:
         return False
 
     img = clean_text(review.get("reviewedImageLink"))
-    if not is_valid_review_image(img):
+    if img and not is_valid_review_image(img):
         return False
 
     rating = review.get("reviewRating", 0)

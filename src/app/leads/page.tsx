@@ -112,13 +112,14 @@ function LeadsContent() {
         data={leads as unknown as Record<string, unknown>[]}
         columns={[
           { key: "sellerName", header: "Seller Name" },
+          { key: "sellerUsername", header: "Seller Username" },
           {
             key: "gigLink",
             header: "Gig Link",
             render: (r) => <UrlCell url={String(r.gigLink || "")} />,
           },
           { key: "gigTitle", header: "Gig Title" },
-          { key: "reviewerName", header: "Reviewer" },
+          { key: "reviewerName", header: "Reviewer Username" },
           { key: "country", header: "Country" },
           {
             key: "review",
@@ -129,6 +130,7 @@ function LeadsContent() {
               </span>
             ),
           },
+          { key: "reviewRating", header: "Review Rating" },
           {
             key: "reviewedImageLink",
             header: "Reviewed Image Link",

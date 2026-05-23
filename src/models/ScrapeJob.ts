@@ -26,6 +26,11 @@ export interface IScrapeJob extends Document {
   status: JobStatus;
   currentGigLink: string;
   currentSeller: string;
+  currentSellerUsername: string;
+  currentGigNumber: number;
+  totalGigs: number;
+  currentReviewPage: number;
+  totalReviewsParsed: number;
   gigsScanned: number;
   reviewsChecked: number;
   usLeadsFound: number;
@@ -84,6 +89,11 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     },
     currentGigLink: { type: String, default: "" },
     currentSeller: { type: String, default: "" },
+    currentSellerUsername: { type: String, default: "" },
+    currentGigNumber: { type: Number, default: 0 },
+    totalGigs: { type: Number, default: 0 },
+    currentReviewPage: { type: Number, default: 0 },
+    totalReviewsParsed: { type: Number, default: 0 },
     gigsScanned: { type: Number, default: 0 },
     reviewsChecked: { type: Number, default: 0 },
     usLeadsFound: { type: Number, default: 0 },

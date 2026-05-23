@@ -6,7 +6,10 @@ export interface IGig extends Document {
   category: string;
   gigUrl: string;
   gigTitle: string;
+  sellerName: string;
   sellerUsername: string;
+  sellerDisplayName: string;
+  mainGigImage: string;
   sellerLevel: string;
   sellerRating: number;
   totalReviews: number;
@@ -22,7 +25,10 @@ const GigSchema = new Schema<IGig>(
     category: { type: String, default: "" },
     gigUrl: { type: String, required: true },
     gigTitle: { type: String, default: "" },
+    sellerName: { type: String, default: "" },
     sellerUsername: { type: String, default: "" },
+    sellerDisplayName: { type: String, default: "" },
+    mainGigImage: { type: String, default: "" },
     sellerLevel: { type: String, default: "" },
     sellerRating: { type: Number, default: 0 },
     totalReviews: { type: Number, default: 0 },

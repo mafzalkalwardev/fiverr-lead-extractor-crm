@@ -121,7 +121,10 @@ async def _main_gig_image(page: Page, gig_url: str) -> str:
     og = await page.locator('meta[property="og:image"]').first.get_attribute("content")
     if og:
         full = absolutize_url(og)
-        if full and GIG_IMAGE_GOOD.search(full) and not BAD_GIG_IMAGE.search(full):
+        if full and not BAD_GIG_IMAGE.search(full) and (
+            GIG_IMAGE_GOOD.search(full)
+            or re.search(r"fiverr|cloudinary", full, re.I)
+        ):
             return full
 
     for sel in ['[class*="gallery" i] img', 'img[src*="cloudinary"]', "main img"]:
@@ -155,19 +158,27 @@ async def extract_gig_metadata(page: Page, gig_url: str, job_id: str) -> dict:
         "gigTitle": gig_title,
         "sellerName": path_user,
         "sellerUsername": path_user,
+        "sellerDisplayName": path_user,
         "mainGigImage": "",
     }
-    slug = seller_name_from_gig(gig) or path_user
-    gig["sellerName"] = slug
-    gig["sellerUsername"] = slug
+    seller_username = seller_name_from_gig(gig) or path_user
+    seller_display = await _extract_seller_display(page, seller_username, gig_title)
+    if not seller_display:
+        seller_display = seller_username
+    gig["sellerName"] = seller_display
+    gig["sellerDisplayName"] = seller_display
+    gig["sellerUsername"] = seller_username
 
     if len(gig_title) < 3:
         raise ValueError("Gig title not found")
 
+    main_image = await _main_gig_image(page, final_url)
+
     return {
         "gigUrl": final_url,
         "gigTitle": gig_title,
-        "sellerName": slug,
-        "sellerUsername": slug,
-        "mainGigImage": "",  # omitted from export — often wrong asset URLs
+        "sellerName": seller_display,
+        "sellerDisplayName": seller_display,
+        "sellerUsername": seller_username,
+        "mainGigImage": main_image,
     }

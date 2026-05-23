@@ -27,7 +27,7 @@ export function usernameFromGigUrl(url: string): string {
     return "";
   }
 }
-const BAD_REVIEWER = /^(fiverr|seller|\d+(\.\d+)?|[1-5](?:\.\d)?)$/i;
+const BAD_REVIEWER = /^(fiverr|seller|buyer|repeat client|seller'?s response|seller response|\d+(\.\d+)?|[1-5](?:\.\d)?)$/i;
 
 function looksLikeRating(value: string): boolean {
   const n = value.trim();
@@ -70,9 +70,10 @@ function reviewerNameBeforeCountry(text: string): string {
   const m = raw.match(/\b(United States|USA|U\.S\.?|Canada)\b/i);
   if (!m || m.index === undefined || m.index <= 0) return "";
   let before = raw.slice(0, m.index).trim().replace(/^[1-5](?:\.\d)?\s*/, "");
+  before = before.replace(/\brepeat client\b/gi, " ").trim();
   const words = before.split(/\s+/);
   for (let n = Math.min(4, words.length); n >= 1; n--) {
-    const cand = words.slice(-n).join(" ");
+    const cand = words.slice(-n).join(" ").replace(/^[A-Z]\s+(?=[A-Za-z0-9_'.-]{2,})/, "");
     if (cand.length >= 2 && !looksLikeRating(cand) && !BAD_REVIEWER.test(cand)) return cand;
   }
   return before.length >= 2 && !looksLikeRating(before) && !BAD_REVIEWER.test(before) ? before : "";
@@ -125,10 +126,12 @@ export function isValidRealLead(gig: GigData, review: ReviewData): boolean {
   const text = (review.reviewText || "").trim();
   if (!text || text.length < 15) return false;
 
-  if (!review.reviewerCountry?.trim()) return false;
+  const country = review.reviewerCountry?.trim();
+  if (country !== "United States" && country !== "Canada") return false;
   if (!Number.isFinite(review.reviewRating) || review.reviewRating <= 0 || review.reviewRating > 5) return false;
 
   const img = (review.reviewedImageLink || "").trim();
+  if (!img) return true;
   const lower = img.toLowerCase();
   if (!img.startsWith("http") || /trophy|generic_asset|avatar|profile|\.gif/i.test(img)) {
     return false;

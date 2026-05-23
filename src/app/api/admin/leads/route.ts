@@ -35,8 +35,12 @@ export async function DELETE(req: NextRequest) {
       const seen = new Set<string>();
       const dupIds: string[] = [];
       for (const l of all) {
-        if (seen.has(l.dedupeKey)) dupIds.push(l._id.toString());
-        else seen.add(l.dedupeKey);
+        const key = [l.gigLink, l.reviewerName, l.review]
+          .map((value) => String(value || "").trim().toLowerCase())
+          .join("|||");
+        const dedupeKey = key || l.dedupeKey;
+        if (seen.has(dedupeKey)) dupIds.push(l._id.toString());
+        else seen.add(dedupeKey);
       }
       if (dupIds.length) await Lead.deleteMany({ _id: { $in: dupIds } });
       await logActivity("records_deleted", `Removed ${dupIds.length} duplicates`, admin._id);

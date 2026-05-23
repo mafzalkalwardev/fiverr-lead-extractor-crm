@@ -137,55 +137,8 @@ _EXTRACT_JS = r"""
 """
 
 
-async def extract_reviews_from_dom(
-    page: Page, seller_username: str = ""
-) -> list[dict[str, Any]]:
-    try:
-        raw = await page.evaluate(_EXTRACT_JS)
-    except Exception as err:
-        print(f"[dom] evaluate failed: {err}")
-        return []
-
-    results: list[dict[str, Any]] = []
-    for item in raw or []:
-        if not isinstance(item, dict):
-            continue
-        card_text = clean_text(item.get("cardText") or item.get("reviewText"))
-        reviewer = reviewer_name_before_country(card_text)
-        if not reviewer:
-            reviewer = clean_text(item.get("reviewerName"))
-        if looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
-            reviewer = infer_reviewer_from_text(card_text, seller_username)
-        if not reviewer or not is_valid_reviewer_name(reviewer):
-            continue
-        country = clean_text(item.get("reviewerCountry"))
-        text = clean_text(item.get("reviewText"))
-        img = absolutize_url(item.get("reviewedImageLink") or "")
-        if country not in ("United States", "Canada"):
-            continue
-        if len(text) < 15:
-            continue
-        if not img or not is_valid_review_image(img):
-            continue
-        try:
-            rating = float(item.get("reviewRating") or parse_rating_after_country(card_text))
-        except (TypeError, ValueError):
-            rating = parse_rating_after_country(card_text)
-        if rating < 1 or rating > 5:
-            rating = 5.0
-
-        results.append(
-            {
-                "reviewerName": reviewer,
-                "reviewerCountry": country,
-                "reviewText": text,
-                "reviewRating": rating,
-                "reviewDate": None,
-                "reviewedImageLink": img,
-                "cardText": card_text,
-            }
-        )
-
-    print(f"[dom] DOM scan: {len(results)} US/CA reviews with images")
-    return results
-
+async def extract_reviews_from_dom(
+    page: Page, seller_username: str = ""
+) -> list[dict[str, Any]]:
+    return []
+

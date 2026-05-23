@@ -44,8 +44,10 @@ export default function AdminLeadsPage() {
         data={leads as unknown as Record<string, unknown>[]}
         columns={[
           { key: "sellerName", header: "Seller" },
-          { key: "reviewerName", header: "Reviewer" },
+          { key: "sellerUsername", header: "Seller Username" },
+          { key: "reviewerName", header: "Reviewer Username" },
           { key: "country", header: "Country" },
+          { key: "reviewRating", header: "Review Rating" },
           { key: "serviceNiche", header: "Niche" },
           {
             key: "review",

@@ -176,7 +176,7 @@ async def _normalize_single_tab(ctx: BrowserContext) -> Page:
 
 async def launch_browser() -> BrowserContext:
     """Launch scraper Chromium once (bundled Playwright only)."""
-    global _context
+    global _context, _playwright
 
     async with _launch_lock:
         if _context and _context_alive(_context):

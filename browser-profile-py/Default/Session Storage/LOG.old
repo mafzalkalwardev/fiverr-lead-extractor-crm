@@ -1,5 +1,6 @@
-2026/05/22-15:07:15.563 3394 Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/MANIFEST-000001
-2026/05/22-15:07:15.583 3394 Recovering log #3
-2026/05/22-15:07:15.586 3394 Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/000003.log 
-2026/05/22-15:19:00.514 3394 Level-0 table #5: started
-2026/05/22-15:19:00.530 3394 Level-0 table #5: 20239 bytes OK
+2026/05/22-16:25:51.157 279c Reusing MANIFEST C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/MANIFEST-000001
+2026/05/22-16:25:51.159 279c Recovering log #6
+2026/05/22-16:25:51.164 279c Reusing old log C:\Users\pc\Desktop\Fiverr Scraper\browser-profile-py\Default\Session Storage/000006.log 
+2026/05/22-16:48:28.447 2294 Level-0 table #10: started
+2026/05/22-16:48:28.465 2294 Level-0 table #10: 16766 bytes OK
+2026/05/22-16:48:28.469 2294 Delete type=0 #6

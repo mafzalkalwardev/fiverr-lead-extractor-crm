@@ -266,6 +266,7 @@ export async function extractGigMetadata(
     gigTitle,
     sellerName: sellerName || sellerUsername,
     sellerUsername,
+    sellerDisplayName: sellerName || sellerUsername,
     mainGigImage: await extractMainImage(page),
   };
 }

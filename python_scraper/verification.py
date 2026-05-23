@@ -7,6 +7,7 @@ from playwright.async_api import Page
 import config
 from browser import close_extra_pages
 from db import append_activity, get_job, update_job
+from utils import normalize_fiverr_url
 from verification_assist import (
     prepare_verification_ui,
     try_press_and_hold,
@@ -23,6 +24,9 @@ VERIFICATION_PATTERNS = [
     r"perimeterx",
 ]
 
+MAX_RESUME_NAVIGATION_ATTEMPTS = 4
+RESUME_NAVIGATION_INTERVAL_SEC = 8.0
+
 
 def _matches_verification_text(text: str) -> bool:
     return any(re.search(pattern, text, re.I) for pattern in VERIFICATION_PATTERNS)
@@ -32,7 +36,10 @@ async def is_verification_page(page: Page) -> bool:
     if page.is_closed():
         return False
     await asyncio.sleep(0.3)
-    title = await page.title()
+    try:
+        title = await page.title()
+    except Exception:
+        title = ""
     body = ""
     try:
         body = (await page.locator("body").inner_text(timeout=3000))[:8000]
@@ -113,6 +120,30 @@ async def is_gig_page_visible(page: Page) -> bool:
     return "fiverr.com" in url and "/search/" not in url and "human touch" not in url.lower()
 
 
+async def is_expected_resume_page(page: Page, resume_url: Optional[str]) -> bool:
+    if page.is_closed() or await is_verification_page(page):
+        return False
+
+    current_url = page.url
+    if not resume_url:
+        return await is_gig_page_visible(page)
+
+    if "/search/" in resume_url:
+        if "fiverr.com" not in current_url or "/search/" not in current_url:
+            return False
+        try:
+            return await page.locator("a[href]").count() > 0
+        except Exception:
+            return True
+
+    target_norm = normalize_fiverr_url(resume_url)
+    current_norm = normalize_fiverr_url(current_url)
+    if target_norm and current_norm:
+        return target_norm == current_norm and await is_gig_page_visible(page)
+
+    return await is_gig_page_visible(page)
+
+
 async def try_auto_clear_verification(page: Page, job_id: str = "") -> bool:
     """Detect verification and optionally make one bounded assist pass."""
     target = await find_context_verification_page(page)
@@ -176,7 +207,8 @@ async def wait_until_verification_clears(
     interval = config.VERIFICATION_POLL_SEC
     timeout = config.VERIFICATION_TIMEOUT_SEC
     auto_attempted = False
-    navigated_after_clear = False
+    resume_attempts = 0
+    last_resume_navigation = -999.0
     last_wait_log = 0.0
 
     while elapsed < timeout:
@@ -198,19 +230,27 @@ async def wait_until_verification_clears(
             elapsed += interval
             continue
 
-        if await is_gig_page_visible(page):
+        if await is_expected_resume_page(page, gig_url):
             append_activity(job_id, "Verification cleared - continuing")
             update_job(job_id, {"status": "extracting_reviews", "verificationMessage": ""})
             return True
 
-        if gig_url and not navigated_after_clear:
-            append_activity(job_id, "Verification page closed - returning to the saved gig URL once")
+        can_resume_navigate = (
+            gig_url
+            and resume_attempts < MAX_RESUME_NAVIGATION_ATTEMPTS
+            and elapsed - last_resume_navigation >= RESUME_NAVIGATION_INTERVAL_SEC
+        )
+        if can_resume_navigate:
+            resume_attempts += 1
+            last_resume_navigation = elapsed
+            append_activity(
+                job_id,
+                f"Verification cleared - returning to saved Fiverr URL ({resume_attempts}/{MAX_RESUME_NAVIGATION_ATTEMPTS})",
+            )
             try:
                 await page.goto(gig_url, wait_until="domcontentloaded", timeout=60_000)
             except Exception:
                 append_activity(job_id, "Saved gig URL did not reload yet; still waiting")
-            navigated_after_clear = True
-            gig_url = None
             await asyncio.sleep(interval)
             elapsed += interval
             continue

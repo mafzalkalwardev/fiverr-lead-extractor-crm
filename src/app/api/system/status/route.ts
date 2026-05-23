@@ -63,7 +63,7 @@ export async function GET() {
     ? scraperEngine === "python"
       ? "Python scraper is running"
       : "Node worker is running (legacy)"
-    : "Scraper not running — start: npm run scraper:py";
+    : "Scraper not running - start: npm run scraper:py";
 
   const configuredEngine = getScraperEngine();
 

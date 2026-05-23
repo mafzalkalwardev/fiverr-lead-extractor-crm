@@ -16,11 +16,13 @@ import { useToast } from "@/components/providers/toast-provider";
 import { EXTRACTION_MODE_LABELS, REVIEW_IMAGE_MODE_LABELS } from "@/lib/extraction-modes";
 
 export default function JobMonitorPage() {
-  const { id } = useParams<{ id: string }>();
+  const params = useParams() as { id?: string } | null;
+  const id = params?.id ?? "";
   const { toast } = useToast();
   const [job, setJob] = useState<ScrapeJob | null>(null);
 
   const fetchJob = useCallback(async () => {
+    if (!id) return;
     try {
       const data = await apiFetch<{ job: ScrapeJob }>(`/api/jobs/${id}`);
       setJob(data.job);
@@ -30,15 +32,17 @@ export default function JobMonitorPage() {
   }, [id]);
 
   useEffect(() => {
+    if (!id) return;
     fetchJob();
-  }, [fetchJob]);
+  }, [fetchJob, id]);
 
   useEffect(() => {
+    if (!id) return;
     const terminal = ["completed", "failed", "stopped", "blocked"];
     const ms = job && terminal.includes(job.status) ? 12000 : 4000;
     const t = setInterval(fetchJob, ms);
     return () => clearInterval(t);
-  }, [fetchJob, job?.status]);
+  }, [fetchJob, job?.status, id]);
 
   const stopJob = async () => {
     try {
@@ -55,7 +59,7 @@ export default function JobMonitorPage() {
       await apiFetch(`/api/jobs/${id}/retry`, { method: "POST" });
       toast({
         title: "Retry queued",
-        description: "Retry is a manual backup; the worker will still use the existing browser session.",
+        description: "The scraper will resume from the saved gig index.",
       });
       fetchJob();
     } catch (err) {
@@ -110,7 +114,7 @@ export default function JobMonitorPage() {
         }`
       : "Searching Fiverr for gig URLs",
     extracting_reviews: "Finishing all reviews on current gig, then next gig",
-    verification_required: "Press & Hold — auto assist running in browser",
+    verification_required: "Verification paused - solve it once in the scraper browser",
     blocked: "Blocked by Fiverr",
     failed: "Failed — see errors below",
     completed: "Completed successfully",
@@ -168,15 +172,15 @@ export default function JobMonitorPage() {
         <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/15 px-4 py-4 text-sm">
           <p className="font-medium text-amber-200">
             {job.verificationMessage ||
-              "Complete Fiverr verification in the opened browser. The app will continue automatically."}
+              "Complete Fiverr verification in the opened browser. The app will continue automatically without refreshing the challenge."}
           </p>
           <ol className="text-xs text-muted-foreground mt-2 list-decimal list-inside space-y-1">
             <li>Look for the Chrome window opened by FT Solutions (not your normal browser).</li>
-            <li>Complete any Fiverr “Press & Hold” or sign-in check there.</li>
-            <li>Leave that window open; Retry is only a manual backup.</li>
+            <li>Complete any Fiverr Press &amp; Hold or sign-in check there.</li>
+            <li>Leave that window open; the worker will resume from the saved gig automatically.</li>
           </ol>
           <p className="text-xs text-muted-foreground mt-2">
-            Progress saved — gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.
+            Progress saved - gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.
           </p>
         </div>
       )}

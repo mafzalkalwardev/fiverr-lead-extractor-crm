@@ -115,15 +115,20 @@ async def _hold_with_playwright_mouse(
     x = box["x"] + box["width"] / 2
     y = box["y"] + box["height"] / 2
     print(f"[verification] Playwright hold at ({x:.0f},{y:.0f}) for {hold_seconds:.1f}s")
-    await page.mouse.move(x, y)
-    await page.mouse.down()
-    end_at = time.monotonic() + hold_seconds
-    wiggle = 1
-    while time.monotonic() < end_at:
-        await asyncio.sleep(min(0.45, max(0.05, end_at - time.monotonic())))
-        wiggle *= -1
-        await page.mouse.move(x + wiggle, y)
-    await page.mouse.up()
+    try:
+        await page.mouse.move(x, y)
+        await page.mouse.down()
+        end_at = time.monotonic() + hold_seconds
+        wiggle = 1
+        while time.monotonic() < end_at:
+            await asyncio.sleep(min(0.45, max(0.05, end_at - time.monotonic())))
+            wiggle *= -1
+            await page.mouse.move(x + wiggle, y)
+    finally:
+        try:
+            await page.mouse.up()
+        except Exception:
+            pass
     await asyncio.sleep(1.0)
     return True
 
@@ -188,7 +193,7 @@ async def assist_verification_loop(page: Page, max_attempts: int = 10) -> bool:
         await prepare_verification_ui(page)
         hold = 5.5 + attempt * 0.4
         if await try_press_and_hold(page, hold_seconds=hold):
-            await asyncio.sleep(2)
+            return True
         else:
             await asyncio.sleep(0.8)
     return False

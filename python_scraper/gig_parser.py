@@ -45,10 +45,7 @@ async def open_gig_page(page: Page, url: str, job_id: str) -> str:
     print(f"[gig] Opening: {target}")
     await page.goto(target, wait_until="domcontentloaded", timeout=120_000)
     await asyncio.sleep(config.GIG_PAGE_WAIT_SEC)
-    from verification import try_auto_clear_verification
-
-    await try_auto_clear_verification(page, job_id)
-    await assert_page_accessible(page, job_id)
+    await assert_page_accessible(page, job_id, target)
     try:
         await page.wait_for_load_state("networkidle", timeout=8_000)
     except Exception:

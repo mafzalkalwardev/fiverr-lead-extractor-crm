@@ -8,7 +8,6 @@ import config
 from browser import close_extra_pages
 from db import append_activity, get_job, update_job
 from verification_assist import (
-    assist_verification_loop,
     prepare_verification_ui,
     try_press_and_hold,
 )
@@ -115,35 +114,42 @@ async def is_gig_page_visible(page: Page) -> bool:
 
 
 async def try_auto_clear_verification(page: Page, job_id: str = "") -> bool:
-    """Attempt Press & Hold automatically whenever verification UI appears."""
+    """Detect verification and optionally make one bounded assist pass."""
     target = await find_context_verification_page(page)
     if not target:
         return True
 
     if job_id:
-        append_activity(job_id, "Auto verification — Press & Hold assist")
+        append_activity(job_id, "Fiverr verification detected - waiting in the browser window")
 
     if job_id and target is not page:
         append_activity(job_id, "Verification challenge tab detected")
 
     await prepare_verification_ui(target)
 
-    for attempt in range(10):
+    attempts = max(0, config.AUTO_VERIFICATION_MAX_ATTEMPTS)
+    if attempts <= 0:
+        if job_id:
+            append_activity(job_id, "Auto press-and-hold is off; solve verification once and leave the window open")
+        return False
+
+    for attempt in range(attempts):
         hold = config.PRESS_HOLD_SECONDS + min(attempt * 0.5, 3)
         pressed = await try_press_and_hold(target, hold_seconds=hold)
         if job_id:
             append_activity(
                 job_id,
-                f"Auto verification attempt {attempt + 1}/10 {'pressed target' if pressed else 'target not found yet'}",
+                f"Verification assist attempt {attempt + 1}/{attempts} {'pressed target' if pressed else 'target not found'}",
             )
-        await assist_verification_loop(target, max_attempts=4)
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(config.AUTO_VERIFICATION_RECHECK_SEC)
         if not await is_verification_page(target):
             if job_id:
                 append_activity(job_id, "Verification cleared automatically")
             await _cleanup_extra_tabs(page, target)
             return True
 
+    if job_id:
+        append_activity(job_id, "Verification still present - waiting without refreshing the page")
     cleared = not await is_verification_page(target)
     if cleared:
         await _cleanup_extra_tabs(page, target)
@@ -162,11 +168,16 @@ async def wait_until_verification_clears(
             "verificationMessage": config.VERIFICATION_MESSAGE,
         },
     )
-    append_activity(job_id, "Fiverr verification — auto assist running")
+    append_activity(job_id, "Fiverr verification - waiting for completion in the browser")
+
+    append_activity(job_id, "Verification pause active - the scraper will wait without refreshing the challenge")
 
     elapsed = 0.0
     interval = config.VERIFICATION_POLL_SEC
     timeout = config.VERIFICATION_TIMEOUT_SEC
+    auto_attempted = False
+    navigated_after_clear = False
+    last_wait_log = 0.0
 
     while elapsed < timeout:
         current = get_job(job_id)
@@ -175,32 +186,49 @@ async def wait_until_verification_clears(
             return False
 
         challenge_page = await find_context_verification_page(page)
-        if not challenge_page and await is_gig_page_visible(page):
-            append_activity(job_id, "Verification cleared — continuing")
+        if challenge_page:
+            if not auto_attempted:
+                await try_auto_clear_verification(page, job_id)
+                auto_attempted = True
+            elif elapsed - last_wait_log >= 20:
+                append_activity(job_id, "Still waiting for verification to clear - no refresh will be sent")
+                last_wait_log = elapsed
+
+            await asyncio.sleep(interval)
+            elapsed += interval
+            continue
+
+        if await is_gig_page_visible(page):
+            append_activity(job_id, "Verification cleared - continuing")
             update_job(job_id, {"status": "extracting_reviews", "verificationMessage": ""})
             return True
 
-        await try_auto_clear_verification(page, job_id)
+        if gig_url and not navigated_after_clear:
+            append_activity(job_id, "Verification page closed - returning to the saved gig URL once")
+            try:
+                await page.goto(gig_url, wait_until="domcontentloaded", timeout=60_000)
+            except Exception:
+                append_activity(job_id, "Saved gig URL did not reload yet; still waiting")
+            navigated_after_clear = True
+            gig_url = None
+            await asyncio.sleep(interval)
+            elapsed += interval
+            continue
+
         await asyncio.sleep(interval)
         elapsed += interval
 
-        if gig_url and int(elapsed) % 15 == 0:
-            try:
-                await page.goto(gig_url, wait_until="domcontentloaded", timeout=60_000)
-                await try_auto_clear_verification(page, job_id)
-            except Exception:
-                pass
-
-    append_activity(job_id, "Verification timed out — click Retry after solving in browser")
+    append_activity(job_id, "Verification timed out - click Retry after solving in browser")
     return False
 
 
-async def assert_page_accessible(page: Page, job_id: str) -> None:
+async def assert_page_accessible(page: Page, job_id: str, return_url: Optional[str] = None) -> None:
     challenge_page = await find_context_verification_page(page)
     if challenge_page:
-        cleared = await try_auto_clear_verification(page, job_id)
-        if not cleared:
-            cleared = await wait_until_verification_clears(page, job_id, page.url)
+        resume_url = return_url
+        if not resume_url and challenge_page is not page:
+            resume_url = page.url
+        cleared = await wait_until_verification_clears(page, job_id, resume_url)
         if not cleared:
             raise VerificationRequiredError()
     if await is_hard_blocked(page):

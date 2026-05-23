@@ -35,7 +35,7 @@ export async function POST(
     });
     await appendJobLog(
       id,
-      "Retry queued — Python scraper will resume from saved gig index."
+      "Retry queued - Python scraper will resume from saved gig index."
     );
 
     await enqueueScrapeJob(id);

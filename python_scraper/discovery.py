@@ -264,14 +264,6 @@ async def discover_gig_urls(
 
 
 
-        from verification import try_auto_clear_verification
-
-
-
-        await try_auto_clear_verification(page, job_id)
-
-
-
         if await is_verification_page(page):
 
             cleared = await wait_until_verification_clears(page, job_id, url)
@@ -282,7 +274,7 @@ async def discover_gig_urls(
 
 
 
-        await assert_page_accessible(page, job_id)
+        await assert_page_accessible(page, job_id, url)
 
         batch = await collect_gig_cards(page)
 

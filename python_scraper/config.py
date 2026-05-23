@@ -21,7 +21,7 @@ PLAYWRIGHT_HEADLESS = os.getenv("PLAYWRIGHT_HEADLESS", "false").lower() == "true
 KEEP_BROWSER_PROFILE = os.getenv("KEEP_BROWSER_PROFILE", "true").lower() == "true"
 
 # Python scraper: bundled Playwright Chromium only unless PYTHON_USE_SYSTEM_CHROME=true.
-# PLAYWRIGHT_CHANNEL in .env is for the legacy Node worker — ignored here by default.
+# PLAYWRIGHT_CHANNEL in .env is for the legacy Node worker - ignored here by default.
 _use_system = os.getenv("PYTHON_USE_SYSTEM_CHROME", "false").lower() == "true"
 PLAYWRIGHT_CHANNEL: Optional[str]
 if _use_system:
@@ -41,7 +41,7 @@ FIVERR_ORIGIN = "https://www.fiverr.com"
 DEFAULT_TARGET_COUNTRIES = ["United States", "Canada"]
 VERIFICATION_MESSAGE = (
     "Complete Fiverr verification in the browser window that opens automatically, "
-    "then wait — the scraper will continue automatically when verification clears."
+    "then leave that window open. The scraper will continue automatically without refreshing the challenge."
 )
 
 BLOCKED_PATH_PREFIXES = {
@@ -59,6 +59,8 @@ STALE_RUNNING_MINUTES = int(os.getenv("PYTHON_STALE_JOB_MINUTES", "2"))
 MAX_SEARCH_PAGES = int(os.getenv("MAX_PAGES_LIMIT", "0"))
 MAX_SEARCH_PAGES_SAFETY = int(os.getenv("MAX_SEARCH_PAGES_SAFETY", "100"))
 PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "5"))
+AUTO_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS", "0"))
+AUTO_VERIFICATION_RECHECK_SEC = float(os.getenv("PYTHON_AUTO_VERIFICATION_RECHECK_SEC", "6"))
 MAX_FAILED_URL_RETRY_PASSES = int(os.getenv("MAX_FAILED_URL_RETRY_PASSES", "1"))
 
 # Safety defaults for client machines: never move/click the real OS mouse unless

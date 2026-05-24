@@ -58,15 +58,14 @@ STALE_RUNNING_MINUTES = int(os.getenv("PYTHON_STALE_JOB_MINUTES", "2"))
 # 0 = paginate through all search result pages (until last page / safety cap)
 MAX_SEARCH_PAGES = int(os.getenv("MAX_PAGES_LIMIT", "0"))
 MAX_SEARCH_PAGES_SAFETY = int(os.getenv("MAX_SEARCH_PAGES_SAFETY", "100"))
-PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "5"))
-AUTO_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS", "0"))
-AUTO_VERIFICATION_RECHECK_SEC = float(os.getenv("PYTHON_AUTO_VERIFICATION_RECHECK_SEC", "6"))
+PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "8"))
+AUTO_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS", "8"))
+AUTO_VERIFICATION_RECHECK_SEC = float(os.getenv("PYTHON_AUTO_VERIFICATION_RECHECK_SEC", "5"))
 MAX_FAILED_URL_RETRY_PASSES = int(os.getenv("MAX_FAILED_URL_RETRY_PASSES", "1"))
 
-# Safety defaults for client machines: never move/click the real OS mouse unless
-# explicitly enabled. Playwright page mouse stays inside the scraper page.
+# Safety defaults — OS mouse stays off; page-scoped Playwright mouse is used.
 ALLOW_OS_MOUSE_AUTOMATION = os.getenv("ALLOW_OS_MOUSE_AUTOMATION", "false").lower() == "true"
-FOCUS_BROWSER_ON_VERIFICATION = os.getenv("FOCUS_BROWSER_ON_VERIFICATION", "false").lower() == "true"
+FOCUS_BROWSER_ON_VERIFICATION = os.getenv("FOCUS_BROWSER_ON_VERIFICATION", "true").lower() == "true"
 BROWSER_WINDOW_WIDTH = int(os.getenv("BROWSER_WINDOW_WIDTH", "1440"))
 BROWSER_WINDOW_HEIGHT = int(os.getenv("BROWSER_WINDOW_HEIGHT", "900"))
 BROWSER_WINDOW_X = int(os.getenv("BROWSER_WINDOW_X", "20"))

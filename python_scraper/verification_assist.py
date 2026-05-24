@@ -350,35 +350,103 @@ async def _viewport_to_screen(page: Page, x: float, y: float) -> Optional[tuple[
 
 
 # ---------------------------------------------------------------------------
+# Viewport-coordinate fallback — used when no DOM element can be found
+# (cross-origin iframe, canvas-only PerimeterX, fully dynamic DOM)
+# ---------------------------------------------------------------------------
+async def _hold_at_viewport_coords(
+    page: Page, x: float, y: float, hold_seconds: float = 8.0
+) -> bool:
+    """Hold mouse at explicit viewport coordinates — bypasses DOM entirely."""
+    print(f"[verification] Coordinate hold at ({x:.0f},{y:.0f}) for {hold_seconds:.1f}s")
+    try:
+        await page.mouse.move(x - random.uniform(8, 18), y - random.uniform(4, 10))
+        await asyncio.sleep(random.uniform(0.06, 0.12))
+        await page.mouse.move(x, y)
+        await asyncio.sleep(random.uniform(0.08, 0.15))
+        await page.mouse.down()
+        end_at = time.monotonic() + hold_seconds
+        direction = 1
+        last_wiggle = time.monotonic()
+        while time.monotonic() < end_at:
+            remaining = end_at - time.monotonic()
+            await asyncio.sleep(min(random.uniform(0.07, 0.13), max(0.02, remaining)))
+            if time.monotonic() - last_wiggle >= random.uniform(0.25, 0.45):
+                direction *= -1
+                await page.mouse.move(
+                    x + direction * random.uniform(0.3, 1.4),
+                    y + random.uniform(-0.5, 0.5),
+                )
+                last_wiggle = time.monotonic()
+    finally:
+        try:
+            await page.mouse.up()
+        except Exception:
+            pass
+    await asyncio.sleep(1.2)
+    return True
+
+
+async def _press_at_verification_center(page: Page, hold_seconds: float = 8.0) -> bool:
+    """
+    Last-resort: press at the visual center of the verification page.
+    Fiverr's PerimeterX PRESS & HOLD button is typically centered
+    horizontally and sits in the upper-center of the visible area.
+    We try three vertical positions to hit it.
+    """
+    vp = page.viewport_size or {"width": 1440, "height": 900}
+    cx = vp["width"] / 2
+    # Try at 40%, 50%, 35% height — button position varies by PerimeterX version
+    for y_ratio in (0.42, 0.50, 0.35):
+        cy = vp["height"] * y_ratio
+        print(f"[verification] Trying viewport-center hold at ({cx:.0f},{cy:.0f})")
+        await _hold_at_viewport_coords(page, cx, cy, hold_seconds)
+        await asyncio.sleep(1.5)
+        # Check if challenge cleared after this press
+        try:
+            body = (await page.locator("body").inner_text(timeout=2000))[:3000]
+            if not any(
+                re.search(p, body, re.I)
+                for p in (r"press\s*&?\s*hold", r"human touch", r"pxcr\d+")
+            ):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Main press-and-hold entry point
 # ---------------------------------------------------------------------------
 async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
     await prepare_verification_ui(page)
 
     loc, _frame = await find_press_hold_target(page)
-    if not loc:
-        print("[verification] No press-and-hold target found on page")
-        return False
 
-    # Primary: Playwright page-scoped mouse (most convincing)
-    ok = await _hold_with_playwright_mouse(page, loc, hold_seconds)
+    if loc:
+        # Primary: Playwright page-scoped mouse on found element
+        ok = await _hold_with_playwright_mouse(page, loc, hold_seconds)
 
-    # Secondary: OS-level PyAutoGUI (if explicitly enabled)
-    if config.ALLOW_OS_MOUSE_AUTOMATION:
-        center = await _get_center_via_js(page, loc)
-        if not center:
-            box = await loc.bounding_box()
-            if box:
-                center = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-        if center:
-            coords = await _viewport_to_screen(page, center[0], center[1])
-            if coords:
-                ok = _hold_with_pyautogui(coords[0], coords[1], hold_seconds) or ok
+        # Secondary: OS-level PyAutoGUI (if explicitly enabled)
+        if config.ALLOW_OS_MOUSE_AUTOMATION:
+            center = await _get_center_via_js(page, loc)
+            if not center:
+                box = await loc.bounding_box()
+                if box:
+                    center = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            if center:
+                coords = await _viewport_to_screen(page, center[0], center[1])
+                if coords:
+                    ok = _hold_with_pyautogui(coords[0], coords[1], hold_seconds) or ok
 
-    # Tertiary: synthetic pointer-event dispatch fallback
-    if not ok:
-        print("[verification] Mouse hold failed — trying pointer event dispatch")
-        ok = await _dispatch_pointer_hold(loc, hold_seconds)
+        # Tertiary: synthetic pointer-event dispatch
+        if not ok:
+            print("[verification] Mouse hold failed — trying pointer event dispatch")
+            ok = await _dispatch_pointer_hold(loc, hold_seconds)
+    else:
+        # Element not found (cross-origin iframe / canvas / dynamic DOM)
+        # Fall back to pressing at calculated viewport coordinates
+        print("[verification] Element not found — trying viewport-center press")
+        ok = await _press_at_verification_center(page, hold_seconds)
 
     return ok
 

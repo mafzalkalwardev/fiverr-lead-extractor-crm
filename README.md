@@ -14,7 +14,7 @@ Next.js CRM plus a Python Playwright scraper for collecting Fiverr leads from pu
 - Same-keyword continuation: a new live job with the same niche skips gig URLs already queued by earlier jobs for that user.
 - Failed gig logging: failed URLs are recorded, screenshots/HTML are saved under `test-results/`, and failed gigs are retried once before the job completes.
 - Agency/gig image protection: seller, agency, profile, and main gig images are no longer accepted as review image links.
-- Fiverr verification assist: the scraper watches for Press & Hold pages, attempts page-scoped hold actions, and resumes automatically when verification clears.
+- Fiverr verification handling: the scraper watches for Fiverr verification pages, keeps the browser open, and resumes automatically after the client completes the check.
 - Browser-extension hydration cleanup for `bis_skin_checked` so extension-injected attributes do not trigger Next hydration errors.
 
 ## Quick Start

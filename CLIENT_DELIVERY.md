@@ -59,10 +59,10 @@ Client machines should keep these settings:
 SCRAPER_ENGINE=python
 PLAYWRIGHT_HEADLESS=false
 ALLOW_OS_MOUSE_AUTOMATION=false
-FOCUS_BROWSER_ON_VERIFICATION=false
+FOCUS_BROWSER_ON_VERIFICATION=true
 ```
 
-`ALLOW_OS_MOUSE_AUTOMATION=false` prevents the scraper from moving/clicking the user's real desktop mouse. Verification assistance stays inside the Playwright page only.
+`ALLOW_OS_MOUSE_AUTOMATION=false` prevents the scraper from moving/clicking the user's real desktop mouse. The scraper waits for the client to complete verification in the opened browser window.
 
 If Fiverr verification appears, the client solves it in the scraper Chromium window. The app will continue after the session is verified.
 

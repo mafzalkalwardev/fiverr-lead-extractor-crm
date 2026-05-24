@@ -1,5 +1,5 @@
 """
-Standalone verification test — run this directly to confirm auto press-and-hold works.
+Standalone verification test - run this directly to confirm verification detection.
 
 Usage:
     cd python_scraper
@@ -9,8 +9,7 @@ What it does:
   1. Opens the existing Fiverr browser profile (preserves cookies / login)
   2. Navigates to a Fiverr gig search page most likely to trigger PerimeterX
   3. Waits up to 30s for a verification challenge to appear
-  4. Attempts the full automatic press-and-hold cycle
-  5. Reports exactly what happened (DOM found / coordinate fallback / cleared)
+  4. Reports exactly what happened and leaves the browser open for manual verification
 """
 import asyncio
 import sys
@@ -24,7 +23,6 @@ from browser import get_work_page, reset_browser
 from verification import (
     find_context_verification_page,
     is_verification_page,
-    try_auto_clear_verification,
 )
 from verification_assist import find_press_hold_target
 
@@ -84,16 +82,10 @@ async def run_test() -> None:
     except Exception:
         pass
 
-    print("[test] Attempting automatic press-and-hold…")
-    cleared = await try_auto_clear_verification(challenge_page, job_id="")
-
-    if cleared:
-        print("[test] SUCCESS — verification cleared automatically!")
-    else:
-        print(
-            "[test] PARTIAL — press-and-hold ran but challenge persists.\n"
-            "       Check the browser window. Try increasing PYTHON_PRESS_HOLD_SECONDS in .env."
-        )
+    print(
+        "[test] Verification challenge is visible.\n"
+        "       Complete it in the scraper browser window; the app worker will resume after it clears."
+    )
 
     await asyncio.sleep(3)
     await reset_browser()

@@ -138,8 +138,8 @@ export default function NewJobPage() {
         <p className="font-medium">Automatic Search (recommended)</p>
         <p className="text-muted-foreground mt-1 text-xs">
           Walks Fiverr search pages, skips gigs already used for the same niche, then opens each gig
-          and saves US/Canada reviews using the review image option selected below. Press &amp; Hold
-          verification is assisted automatically in the scraper browser.
+          and saves US/Canada reviews using the review image option selected below. If Fiverr asks
+          for verification, complete it in the scraper browser and the job will resume.
         </p>
       </div>
 

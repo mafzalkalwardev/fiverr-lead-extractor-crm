@@ -55,7 +55,7 @@ export function WorkerStatusBanner() {
     return (
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-400">
         <CheckCircle2 className="h-4 w-4 shrink-0" />
-        Python scraper active - jobs pause for Fiverr verification and resume automatically
+        Python scraper active - jobs resume automatically after browser verification
       </div>
     );
   }

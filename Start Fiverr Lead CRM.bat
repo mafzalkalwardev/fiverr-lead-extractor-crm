@@ -54,6 +54,10 @@ echo Freeing port 3000 and browser locks...
 call npm.cmd run free:port
 call npm.cmd run free:browser
 
+set "PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS=0"
+set "ALLOW_OS_MOUSE_AUTOMATION=false"
+set "FOCUS_BROWSER_ON_VERIFICATION=true"
+
 echo.
 echo Starting... app window will open automatically.
 echo.

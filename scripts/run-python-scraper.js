@@ -19,10 +19,18 @@ const main = path.join(root, "python_scraper", "main.py");
 
 console.log("[scraper] Python service starting (browser opens when you create a job)...");
 
+const env = {
+  ...process.env,
+  PYTHONDONTWRITEBYTECODE: "1",
+  PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS: "0",
+  ALLOW_OS_MOUSE_AUTOMATION: "false",
+  FOCUS_BROWSER_ON_VERIFICATION: process.env.FOCUS_BROWSER_ON_VERIFICATION || "true",
+};
+
 const child = spawn(python, [main, ...args], {
   cwd: root,
   stdio: "inherit",
-  env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+  env,
 });
 
 child.on("exit", (code) => process.exit(code ?? 1));

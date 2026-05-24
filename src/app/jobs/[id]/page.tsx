@@ -119,7 +119,7 @@ export default function JobMonitorPage() {
         }`
       : "Searching Fiverr for gig URLs",
     extracting_reviews: "Finishing all reviews on current gig, then next gig",
-    verification_required: "Auto press-and-hold running — check activity log below for attempts",
+    verification_required: "Complete Fiverr verification in the scraper browser; scraping resumes automatically",
     blocked: "Blocked by Fiverr",
     failed: "Failed — see errors below",
     completed: "Completed successfully",

@@ -65,9 +65,9 @@ dist\Fiverr Lead Extractor.exe
 - Live discovery skips previous same-niche gig queues for the same user.
 - Failed gig URLs are logged to `failedurls`, added to job errors, saved with screenshot/HTML artifacts, and retried once.
 - Agency/main gig image URLs are rejected as review image links.
-- Verification assist now logs each auto attempt and uses more robust Press & Hold selectors.
+- Verification handling now logs the wait state and resumes after the client completes the browser check.
 - Root layout strips `bis_skin_checked` before hydration to suppress extension-caused hydration mismatches.
 
 ## Manual Live Test Note
 
-Live Fiverr extraction depends on network state and Fiverr verification. If a job pauses at verification, solve the challenge in the scraper browser and keep the browser open. The worker logs should show auto verification attempts and continue when the page clears.
+Live Fiverr extraction depends on network state and Fiverr verification. If a job pauses at verification, solve the challenge in the scraper browser and keep the browser open. The worker logs should show it waiting and continue when the page clears.

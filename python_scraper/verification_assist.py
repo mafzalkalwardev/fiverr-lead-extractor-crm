@@ -1,5 +1,5 @@
 """
-Assist Fiverr 'Press & Hold' verification with page-scoped Playwright actions.
+Assist Fiverr verification by focusing the scraper browser and locating the challenge.
 
 Strategy (in order):
   1. CSS selectors across all frames (PerimeterX, generic captcha)
@@ -8,7 +8,7 @@ Strategy (in order):
   4. Playwright mouse hold with natural wiggle simulation
   5. Explicit pointer-event dispatch if mouse hold returns no result
 
-OS-level PyAutoGUI is disabled by default — only enabled with ALLOW_OS_MOUSE_AUTOMATION=true.
+OS-level mouse automation is disabled for client delivery.
 """
 import asyncio
 import random
@@ -356,7 +356,7 @@ async def _viewport_to_screen(page: Page, x: float, y: float) -> Optional[tuple[
 async def _hold_at_viewport_coords(
     page: Page, x: float, y: float, hold_seconds: float = 8.0
 ) -> bool:
-    """Hold mouse at explicit viewport coordinates — bypasses DOM entirely."""
+    """Legacy coordinate helper retained for old debug scripts."""
     print(f"[verification] Coordinate hold at ({x:.0f},{y:.0f}) for {hold_seconds:.1f}s")
     try:
         await page.mouse.move(x - random.uniform(8, 18), y - random.uniform(4, 10))
@@ -461,9 +461,20 @@ async def _simulate_human_reading(page: Page, target_x: Optional[float] = None, 
 
 
 # ---------------------------------------------------------------------------
-# Main press-and-hold entry point
+# Client-safe verification entry point
 # ---------------------------------------------------------------------------
 async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
+    print("[verification] Automatic press-and-hold is disabled; waiting for client verification")
+    await prepare_verification_ui(page)
+    return False
+
+
+async def assist_verification_loop(page: Page, max_attempts: int = 10) -> bool:
+    await prepare_verification_ui(page)
+    return False
+
+
+async def _legacy_try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
     await prepare_verification_ui(page)
 
     loc, _frame = await find_press_hold_target(page)
@@ -506,7 +517,7 @@ async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
     return ok
 
 
-async def assist_verification_loop(page: Page, max_attempts: int = 10) -> bool:
+async def _legacy_assist_verification_loop(page: Page, max_attempts: int = 10) -> bool:
     for attempt in range(max_attempts):
         await prepare_verification_ui(page)
         hold = 6.0 + attempt * 0.5

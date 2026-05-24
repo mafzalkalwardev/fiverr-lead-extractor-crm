@@ -243,6 +243,16 @@ async def launch_browser() -> BrowserContext:
                     **_launch_kwargs(),
                 )
                 _context.on("close", lambda: _set_context_none())
+                await _context.add_init_script("""
+                    try {
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+                        Object.defineProperty(navigator, 'languages', {get: () => ['en-US','en']});
+                        if (!window.chrome) window.chrome = {runtime: {}};
+                        const orig = window.Notification;
+                        if (orig) window.Notification = orig;
+                    } catch(e) {}
+                """)
                 if config.BLOCK_HEAVY_RESOURCES:
                     await _install_resource_filter(_context)
                 await _normalize_single_tab(_context)

@@ -1,10 +1,17 @@
 """
 Assist Fiverr 'Press & Hold' verification with page-scoped Playwright actions.
 
-OS-level mouse automation is disabled by default because it can move/click the
-user's real desktop. It can be enabled only with ALLOW_OS_MOUSE_AUTOMATION=true.
+Strategy (in order):
+  1. CSS selectors across all frames (PerimeterX, generic captcha)
+  2. JS DOM evaluation fallback (canvas, hidden IDs, dynamic classes)
+  3. Text-content search across all frames
+  4. Playwright mouse hold with natural wiggle simulation
+  5. Explicit pointer-event dispatch if mouse hold returns no result
+
+OS-level PyAutoGUI is disabled by default — only enabled with ALLOW_OS_MOUSE_AUTOMATION=true.
 """
 import asyncio
+import random
 import re
 import sys
 import time
@@ -14,34 +21,62 @@ from playwright.async_api import Frame, Locator, Page
 
 import config
 
+# ---------------------------------------------------------------------------
+# Selectors — ordered from most-specific to broadest
+# ---------------------------------------------------------------------------
 PRESS_HOLD_SELECTORS = [
+    # PerimeterX primary IDs
     "#px-captcha",
     "#px-captcha-wrapper",
     "#px-captcha-container",
-    '[id*="px-captcha" i]',
-    '[id*="px" i]',
+    "#px-captcha-button",
+    '[id^="px-captcha"]',
+    '[id*="px-captcha"]',
+    # PerimeterX dynamic / partial
+    '[id^="px"]',
+    '[class*="px-captcha"]',
+    # Canvas targets (PerimeterX often uses canvas)
+    "canvas",
+    # Fiverr human-touch specific
+    '[class*="human-touch"]',
+    '[class*="humanTouch"]',
+    '[id*="human"]',
+    # Generic captcha classes
+    '[class*="captcha-button"]',
+    '[class*="press-hold"]',
+    '[class*="hold-button"]',
+    '[class*="challenge-button"]',
+    # Iframe containers (we'll navigate inside them separately)
     "iframe[src*='captcha']",
     "iframe[src*='perimeterx']",
+    "iframe[src*='px-cloud']",
     "iframe[title*='challenge' i]",
     "iframe[title*='captcha' i]",
+    # Aria / role
     '[aria-label*="press" i]',
     '[aria-label*="hold" i]',
     '[role="button"]:has-text("Press")',
     '[role="button"]:has-text("Hold")',
+    # Class wildcards
     '[class*="hold" i]',
     '[class*="captcha" i]',
     '[class*="challenge" i]',
+    # Text-based buttons
     'button:has-text("Press")',
+    'button:has-text("Hold")',
+    'div:has-text("Press & Hold")',
     'p:has-text("Press")',
 ]
 
 
+# ---------------------------------------------------------------------------
+# Window focus helper
+# ---------------------------------------------------------------------------
 def _focus_browser_on_windows() -> None:
     if sys.platform != "win32":
         return
     try:
         import ctypes
-
         user32 = ctypes.windll.user32
         targets = ("chromium", "chrome", "fiverr")
 
@@ -76,64 +111,212 @@ async def prepare_verification_ui(page: Page) -> None:
     await asyncio.sleep(0.4)
 
 
+# ---------------------------------------------------------------------------
+# DOM helpers
+# ---------------------------------------------------------------------------
+async def _scroll_element_into_view(loc: Locator) -> None:
+    """Scroll element to center of viewport so mouse coordinates are valid."""
+    try:
+        await loc.scroll_into_view_if_needed(timeout=3000)
+        await asyncio.sleep(0.25)
+    except Exception:
+        pass
+
+
+async def _get_center_via_js(page: Page, loc: Locator) -> Optional[tuple[float, float]]:
+    """Re-read element center after scroll using getBoundingClientRect for accuracy."""
+    try:
+        pos = await loc.evaluate("""el => {
+            el.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
+            const r = el.getBoundingClientRect();
+            return {x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height};
+        }""")
+        if pos and pos.get("w", 0) >= 8 and pos.get("h", 0) >= 8:
+            return float(pos["x"]), float(pos["y"])
+    except Exception:
+        pass
+    return None
+
+
+async def _find_captcha_via_js(page: Page) -> Optional[Locator]:
+    """
+    JS DOM evaluation fallback — finds captcha elements that CSS selectors miss
+    (dynamically assigned IDs, shadow-DOM-adjacent, canvas inside container).
+    Assigns a known ID so Playwright can address it.
+    """
+    try:
+        result = await page.evaluate("""() => {
+            const assign = (el, id) => { el.id = id; return id; };
+
+            // PerimeterX exact IDs
+            let el = document.querySelector('#px-captcha,#px-captcha-container,#px-captcha-wrapper,#px-captcha-button');
+            if (el) return {sel: '#' + el.id};
+
+            // Any element whose ID starts with px
+            el = document.querySelector('[id^="px"]');
+            if (el && el.offsetWidth > 30) return {sel: '#' + el.id};
+
+            // Human-touch class
+            el = document.querySelector('[class*="human-touch"],[class*="humanTouch"],[class*="press-hold"]');
+            if (el) return {sel: '#' + assign(el, '__fv_captcha__')};
+
+            // Large visible canvas (PerimeterX renders on canvas)
+            const canvases = Array.from(document.querySelectorAll('canvas'));
+            for (const c of canvases) {
+                if (c.offsetWidth > 80 && c.offsetHeight > 40) {
+                    return {sel: '#' + assign(c, '__fv_canvas__')};
+                }
+            }
+
+            // Any role=button with press/hold text
+            const buttons = Array.from(document.querySelectorAll('[role="button"],button'));
+            for (const b of buttons) {
+                const txt = (b.textContent || '').toLowerCase();
+                if (txt.includes('press') || txt.includes('hold')) {
+                    return {sel: '#' + assign(b, '__fv_btn__')};
+                }
+            }
+
+            return null;
+        }""")
+        if result and result.get("sel"):
+            loc = page.locator(result["sel"]).first
+            if await loc.count():
+                return loc
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Element finder — tries all frames then JS fallback
+# ---------------------------------------------------------------------------
 async def find_press_hold_target(page: Page) -> tuple[Optional[Locator], Optional[Frame]]:
+    # 1. Iterate every frame (includes iframes Playwright can access)
     for frame in page.frames:
         for sel in PRESS_HOLD_SELECTORS:
-            loc = frame.locator(sel).first
             try:
+                loc = frame.locator(sel).first
                 if await loc.count() and await loc.is_visible():
                     return loc, frame
             except Exception:
                 continue
-        loc = frame.get_by_text(re.compile(r"press\s*&?\s*hold", re.I)).first
+        # Text search within frame
         try:
+            loc = frame.get_by_text(re.compile(r"press\s*&?\s*hold", re.I)).first
             if await loc.count() and await loc.is_visible():
                 return loc, frame
         except Exception:
-            continue
+            pass
 
+    # 2. Main page selectors (redundant safety pass)
     for sel in PRESS_HOLD_SELECTORS:
-        loc = page.locator(sel).first
         try:
+            loc = page.locator(sel).first
             if await loc.count() and await loc.is_visible():
                 return loc, page.main_frame
         except Exception:
             continue
 
-    loc = page.get_by_text(re.compile(r"press\s*&?\s*hold", re.I)).first
-    if await loc.count() and await loc.is_visible():
-        return loc, page.main_frame
+    # 3. JS DOM evaluation fallback
+    js_loc = await _find_captcha_via_js(page)
+    if js_loc:
+        return js_loc, page.main_frame
+
+    # 4. Full-text fallback on main page
+    try:
+        loc = page.get_by_text(re.compile(r"press\s*&?\s*hold", re.I)).first
+        if await loc.count() and await loc.is_visible():
+            return loc, page.main_frame
+    except Exception:
+        pass
+
     return None, None
 
 
+# ---------------------------------------------------------------------------
+# Mouse hold — natural movement + wiggle
+# ---------------------------------------------------------------------------
 async def _hold_with_playwright_mouse(
-    page: Page, loc: Locator, hold_seconds: float = 6.0
+    page: Page, loc: Locator, hold_seconds: float = 8.0
 ) -> bool:
-    box = await loc.bounding_box()
-    if not box or box["width"] < 8:
-        return False
-    x = box["x"] + box["width"] / 2
-    y = box["y"] + box["height"] / 2
+    # Scroll into view first so coordinates are in viewport
+    await _scroll_element_into_view(loc)
+
+    # Try JS-accurate center first, fall back to bounding_box
+    center = await _get_center_via_js(page, loc)
+    if not center:
+        box = await loc.bounding_box()
+        if not box or box["width"] < 8:
+            return False
+        center = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+
+    x, y = center
     print(f"[verification] Playwright hold at ({x:.0f},{y:.0f}) for {hold_seconds:.1f}s")
+
     try:
+        # Natural approach movement before pressing
+        await page.mouse.move(x - random.uniform(8, 20), y - random.uniform(4, 12))
+        await asyncio.sleep(random.uniform(0.06, 0.12))
         await page.mouse.move(x, y)
+        await asyncio.sleep(random.uniform(0.08, 0.15))
+
         await page.mouse.down()
         end_at = time.monotonic() + hold_seconds
-        wiggle = 1
+        last_wiggle = time.monotonic()
+        direction = 1
+
         while time.monotonic() < end_at:
-            await asyncio.sleep(min(0.45, max(0.05, end_at - time.monotonic())))
-            wiggle *= -1
-            await page.mouse.move(x + wiggle, y)
+            remaining = end_at - time.monotonic()
+            sleep_ms = random.uniform(0.06, 0.14)
+            await asyncio.sleep(min(sleep_ms, max(0.02, remaining)))
+
+            # Wiggle every 200-450 ms to appear human
+            if time.monotonic() - last_wiggle >= random.uniform(0.2, 0.45):
+                direction *= -1
+                dx = direction * random.uniform(0.3, 1.5)
+                dy = random.uniform(-0.6, 0.6)
+                await page.mouse.move(x + dx, y + dy)
+                last_wiggle = time.monotonic()
+
     finally:
         try:
             await page.mouse.up()
         except Exception:
             pass
-    await asyncio.sleep(1.0)
+
+    await asyncio.sleep(1.2)
     return True
 
 
-def _hold_with_pyautogui(screen_x: float, screen_y: float, hold_seconds: float = 6.0) -> bool:
+# ---------------------------------------------------------------------------
+# Pointer-event dispatch fallback (synthetic events — last resort)
+# ---------------------------------------------------------------------------
+async def _dispatch_pointer_hold(loc: Locator, hold_seconds: float = 8.0) -> bool:
+    """
+    Directly dispatch pointerdown/up events on the element.
+    Less convincing than real mouse but works when viewport coords are off.
+    """
+    try:
+        await loc.dispatch_event("pointerover")
+        await loc.dispatch_event("pointerenter")
+        await asyncio.sleep(0.05)
+        await loc.dispatch_event("pointerdown", {"button": 0, "buttons": 1, "bubbles": True})
+        await loc.dispatch_event("mousedown", {"button": 0, "buttons": 1, "bubbles": True})
+        await asyncio.sleep(hold_seconds)
+        await loc.dispatch_event("pointerup", {"button": 0, "buttons": 0, "bubbles": True})
+        await loc.dispatch_event("mouseup", {"button": 0, "buttons": 0, "bubbles": True})
+        await loc.dispatch_event("click", {"bubbles": True})
+        return True
+    except Exception as err:
+        print(f"[verification] Pointer dispatch error: {err}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# PyAutoGUI OS-level fallback (disabled unless ALLOW_OS_MOUSE_AUTOMATION=true)
+# ---------------------------------------------------------------------------
+def _hold_with_pyautogui(screen_x: float, screen_y: float, hold_seconds: float = 8.0) -> bool:
     if not config.ALLOW_OS_MOUSE_AUTOMATION:
         return False
     try:
@@ -166,34 +349,45 @@ async def _viewport_to_screen(page: Page, x: float, y: float) -> Optional[tuple[
         return None
 
 
-async def try_press_and_hold(page: Page, hold_seconds: float = 6.0) -> bool:
+# ---------------------------------------------------------------------------
+# Main press-and-hold entry point
+# ---------------------------------------------------------------------------
+async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
     await prepare_verification_ui(page)
 
     loc, _frame = await find_press_hold_target(page)
     if not loc:
+        print("[verification] No press-and-hold target found on page")
         return False
 
-    box = await loc.bounding_box()
-    if not box:
-        return False
-
-    cx = box["x"] + box["width"] / 2
-    cy = box["y"] + box["height"] / 2
-
+    # Primary: Playwright page-scoped mouse (most convincing)
     ok = await _hold_with_playwright_mouse(page, loc, hold_seconds)
+
+    # Secondary: OS-level PyAutoGUI (if explicitly enabled)
     if config.ALLOW_OS_MOUSE_AUTOMATION:
-        coords = await _viewport_to_screen(page, cx, cy)
-        if coords:
-            ok = _hold_with_pyautogui(coords[0], coords[1], hold_seconds) or ok
+        center = await _get_center_via_js(page, loc)
+        if not center:
+            box = await loc.bounding_box()
+            if box:
+                center = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        if center:
+            coords = await _viewport_to_screen(page, center[0], center[1])
+            if coords:
+                ok = _hold_with_pyautogui(coords[0], coords[1], hold_seconds) or ok
+
+    # Tertiary: synthetic pointer-event dispatch fallback
+    if not ok:
+        print("[verification] Mouse hold failed — trying pointer event dispatch")
+        ok = await _dispatch_pointer_hold(loc, hold_seconds)
+
     return ok
 
 
 async def assist_verification_loop(page: Page, max_attempts: int = 10) -> bool:
     for attempt in range(max_attempts):
         await prepare_verification_ui(page)
-        hold = 5.5 + attempt * 0.4
+        hold = 6.0 + attempt * 0.5
         if await try_press_and_hold(page, hold_seconds=hold):
             return True
-        else:
-            await asyncio.sleep(0.8)
+        await asyncio.sleep(0.8)
     return False

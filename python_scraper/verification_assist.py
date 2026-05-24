@@ -395,8 +395,9 @@ async def _press_at_verification_center(page: Page, hold_seconds: float = 8.0) -
     """
     vp = page.viewport_size or {"width": 1440, "height": 900}
     cx = vp["width"] / 2
-    # Try at 40%, 50%, 35% height — button position varies by PerimeterX version
-    for y_ratio in (0.42, 0.50, 0.35):
+    # Try multiple vertical positions — PerimeterX button varies by version and Fiverr layout
+    # Fiverr typically shows it around 50-60% height; broader sweep for resilience
+    for y_ratio in (0.55, 0.50, 0.42, 0.60, 0.35, 0.65):
         cy = vp["height"] * y_ratio
         print(f"[verification] Trying viewport-center hold at ({cx:.0f},{cy:.0f})")
         await _hold_at_viewport_coords(page, cx, cy, hold_seconds)
@@ -415,6 +416,51 @@ async def _press_at_verification_center(page: Page, hold_seconds: float = 8.0) -
 
 
 # ---------------------------------------------------------------------------
+# Human pre-press simulation — PerimeterX flags instant clicks as bots
+# ---------------------------------------------------------------------------
+async def _simulate_human_reading(page: Page, target_x: Optional[float] = None, target_y: Optional[float] = None) -> None:
+    """
+    Move mouse naturally for 2-3 seconds before pressing.
+    PerimeterX monitors time-on-page and mouse movement before a press;
+    an instant click after page load is a bot signal.
+    """
+    vp = page.viewport_size or {"width": 1440, "height": 900}
+    cx = target_x or (vp["width"] / 2)
+    cy = target_y or (vp["height"] * 0.5)
+
+    # Start from a random corner-ish position
+    start_x = random.uniform(vp["width"] * 0.2, vp["width"] * 0.4)
+    start_y = random.uniform(vp["height"] * 0.2, vp["height"] * 0.4)
+
+    try:
+        # Move to starting position
+        await page.mouse.move(start_x, start_y)
+        await asyncio.sleep(random.uniform(0.3, 0.6))
+
+        # A couple of small random wanders (simulates eyes scanning the page)
+        for _ in range(random.randint(2, 4)):
+            wx = start_x + random.uniform(-60, 60)
+            wy = start_y + random.uniform(-40, 40)
+            await page.mouse.move(wx, wy)
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+
+        # Slow drift toward the target
+        steps = random.randint(4, 7)
+        for i in range(steps):
+            progress = (i + 1) / steps
+            ix = start_x + (cx - start_x) * progress + random.uniform(-8, 8)
+            iy = start_y + (cy - start_y) * progress + random.uniform(-5, 5)
+            await page.mouse.move(ix, iy)
+            await asyncio.sleep(random.uniform(0.1, 0.25))
+
+        # Hover over target for a moment before pressing
+        await page.mouse.move(cx, cy)
+        await asyncio.sleep(random.uniform(0.4, 0.8))
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Main press-and-hold entry point
 # ---------------------------------------------------------------------------
 async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
@@ -423,6 +469,14 @@ async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
     loc, _frame = await find_press_hold_target(page)
 
     if loc:
+        # Simulate human reading/scanning the page before pressing
+        center_pre = await _get_center_via_js(page, loc)
+        if not center_pre:
+            box = await loc.bounding_box()
+            if box:
+                center_pre = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        await _simulate_human_reading(page, *(center_pre or ()))
+
         # Primary: Playwright page-scoped mouse on found element
         ok = await _hold_with_playwright_mouse(page, loc, hold_seconds)
 
@@ -444,8 +498,9 @@ async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
             ok = await _dispatch_pointer_hold(loc, hold_seconds)
     else:
         # Element not found (cross-origin iframe / canvas / dynamic DOM)
-        # Fall back to pressing at calculated viewport coordinates
+        # Simulate human reading before falling back to coordinate press
         print("[verification] Element not found — trying viewport-center press")
+        await _simulate_human_reading(page)
         ok = await _press_at_verification_center(page, hold_seconds)
 
     return ok

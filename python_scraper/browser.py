@@ -119,9 +119,10 @@ def _context_alive(ctx: BrowserContext) -> bool:
 def _launch_kwargs() -> dict[str, Any]:
     return {
         "headless": config.PLAYWRIGHT_HEADLESS,
+        # Must match the bundled Chromium version (Playwright 1.55 = Chromium 136)
         "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
         ),
         "viewport": {
             "width": config.BROWSER_WINDOW_WIDTH,
@@ -133,12 +134,12 @@ def _launch_kwargs() -> dict[str, Any]:
             "--disable-blink-features=AutomationControlled",
             "--no-sandbox",
             "--disable-dev-shm-usage",
-            "--disable-extensions",
             "--disable-sync",
             "--disable-translate",
             "--mute-audio",
             "--no-first-run",
             "--no-default-browser-check",
+            "--disable-features=IsolateOrigins,site-per-process",
             f"--window-size={config.BROWSER_WINDOW_WIDTH},{config.BROWSER_WINDOW_HEIGHT}",
             f"--window-position={config.BROWSER_WINDOW_X},{config.BROWSER_WINDOW_Y}",
         ],
@@ -245,12 +246,40 @@ async def launch_browser() -> BrowserContext:
                 _context.on("close", lambda: _set_context_none())
                 await _context.add_init_script("""
                     try {
+                        // Hide automation signals
                         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                        Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+                        delete navigator.__proto__.webdriver;
+
+                        // Realistic plugin list
+                        Object.defineProperty(navigator, 'plugins', {get: () => {
+                            const arr = [
+                                {name:'Chrome PDF Plugin',filename:'internal-pdf-viewer'},
+                                {name:'Chrome PDF Viewer',filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai'},
+                                {name:'Native Client',filename:'internal-nacl-plugin'}
+                            ];
+                            arr.__proto__ = PluginArray.prototype;
+                            return arr;
+                        }});
                         Object.defineProperty(navigator, 'languages', {get: () => ['en-US','en']});
-                        if (!window.chrome) window.chrome = {runtime: {}};
-                        const orig = window.Notification;
-                        if (orig) window.Notification = orig;
+                        Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                        Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                        Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+
+                        // Chrome runtime object (real Chrome has this)
+                        if (!window.chrome) window.chrome = {};
+                        if (!window.chrome.runtime) window.chrome.runtime = {};
+                        window.chrome.runtime.sendMessage = () => {};
+
+                        // Permissions API — real Chrome returns 'prompt' for notifications
+                        const origQuery = window.Permissions && window.Permissions.prototype.query;
+                        if (origQuery) {
+                            window.Permissions.prototype.query = function(params) {
+                                if (params && params.name === 'notifications') {
+                                    return Promise.resolve({state: 'prompt', onchange: null});
+                                }
+                                return origQuery.call(this, params);
+                            };
+                        }
                     } catch(e) {}
                 """)
                 if config.BLOCK_HEAVY_RESOURCES:

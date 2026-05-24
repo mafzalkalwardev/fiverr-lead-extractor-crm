@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Download, Square, RefreshCw, ExternalLink } from "lucide-react";
@@ -43,6 +43,11 @@ export default function JobMonitorPage() {
     const t = setInterval(fetchJob, ms);
     return () => clearInterval(t);
   }, [fetchJob, job?.status, id]);
+
+  const logEndRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [job?.activityLog?.length]);
 
   const stopJob = async () => {
     try {
@@ -114,7 +119,7 @@ export default function JobMonitorPage() {
         }`
       : "Searching Fiverr for gig URLs",
     extracting_reviews: "Finishing all reviews on current gig, then next gig",
-    verification_required: "Verification paused - solve it once in the scraper browser",
+    verification_required: "Auto press-and-hold running — check activity log below for attempts",
     blocked: "Blocked by Fiverr",
     failed: "Failed — see errors below",
     completed: "Completed successfully",
@@ -219,8 +224,12 @@ export default function JobMonitorPage() {
             {(job.activityLog || []).length === 0 ? (
               <li className="text-muted-foreground">No activity yet</li>
             ) : (
-              (job.activityLog || []).slice(-40).map((line, i) => (
-                <li key={i} className="text-muted-foreground leading-relaxed">
+              (job.activityLog || []).slice(-40).map((line, i, arr) => (
+                <li
+                  key={i}
+                  ref={i === arr.length - 1 ? logEndRef : null}
+                  className="text-muted-foreground leading-relaxed"
+                >
                   {line}
                 </li>
               ))

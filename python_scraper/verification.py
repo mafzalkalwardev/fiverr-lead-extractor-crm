@@ -6,7 +6,7 @@ from playwright.async_api import Page
 
 import config
 from browser import close_extra_pages
-from db import append_activity, get_job, update_job
+from db import append_activity, get_job, set_heartbeat, update_job
 from utils import normalize_fiverr_url
 from verification_assist import (
     prepare_verification_ui,
@@ -239,8 +239,17 @@ async def wait_until_verification_clears(
     resume_attempts = 0
     last_resume_navigation = -999.0
     last_wait_log = 0.0
+    last_heartbeat = 0.0
 
     while elapsed < timeout:
+        # Keep scraper heartbeat alive so UI doesn't show "offline" during wait
+        if elapsed - last_heartbeat >= 20.0:
+            try:
+                set_heartbeat()
+            except Exception:
+                pass
+            last_heartbeat = elapsed
+
         # Respect user stop
         current = get_job(job_id)
         if current and current.get("status") == "stopped":

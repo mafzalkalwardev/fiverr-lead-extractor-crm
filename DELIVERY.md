@@ -1,64 +1,72 @@
-# Delivery — Fiverr Lead Extractor CRM (working setup)
+# Delivery - Fiverr Lead Extractor CRM
 
 ## Important
 
-Fiverr blocks **unattended** bots. This app does **not** bypass CAPTCHA.
-It uses a **persistent browser profile** so you verify **once**, then jobs reuse that session.
+Fiverr blocks unattended bots. This app does not bypass CAPTCHA. It uses a persistent browser profile so the customer verifies when Fiverr asks, then jobs reuse that session.
 
----
+## Customer Local Database
 
-## 5-minute working setup
+Customer delivery uses bundled portable MongoDB, not Atlas, Compass, winget, or the MongoDB Windows Service.
 
-### Terminal 1 — Redis
+Startup runs:
+
 ```powershell
-cd "C:\Users\pc\Desktop\Fiverr Scraper"
-powershell -ExecutionPolicy Bypass -File scripts\start-redis5.ps1
+scripts\start-local-mongo.ps1
 ```
 
-### Terminal 2 — One-time browser setup (visible window)
-```powershell
-cd "C:\Users\pc\Desktop\Fiverr Scraper"
-npm run setup:browser
-```
-Complete "Press & Hold" in the Chromium window → press ENTER in terminal.
+Database files:
 
-### Terminal 3 — Worker
-```powershell
-npm run worker
+```text
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\data\db
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\logs\mongod.log
 ```
 
-### Terminal 4 — App
+Default local URI:
+
+```env
+MONGODB_URI=mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm
+```
+
+If `27017` is busy, startup uses `27018` and updates `.env`.
+
+## 5-minute Working Setup
+
+Double-click `Start Fiverr Lead CRM.bat` or run:
+
 ```powershell
-npm run dev
+npm run client:start:fast
 ```
 
 Login: `admin@ftsolutions.local` / `Admin@FT2024`
 
-If login fails (invalid token): clear site data / use incognito once, or re-login after `npm run seed:admin`.
+If login fails, clear site data or sign in from an incognito window once. If the admin account is missing, run `npm run seed:admin` after portable MongoDB is ready.
 
----
+## Create A Job That Works
 
-## Create a job that WORKS
+### Option A - Manual URLs
 
-### Option A — Manual URLs (fastest, always works after setup)
-1. In **Chrome**, search Fiverr for your niche, open 3–5 gigs.
-2. Copy full URLs (`https://www.fiverr.com/seller/gig-slug`).
-3. App → **Create Job** → **Manual Browser Mode** → paste URLs.
-4. Monitor → Export.
+1. In Chrome, search Fiverr for your niche and open 3-5 gigs.
+2. Copy full URLs like `https://www.fiverr.com/seller/gig-slug`.
+3. App -> Create Job -> Manual Browser Mode -> paste URLs.
+4. Monitor -> Export.
 
-### Option B — Live mode (after setup:browser)
-1. **Create Job** → **Live Mode** → niche `car wrap`.
-2. If `verification_required` → complete in worker browser → **Retry**.
+### Option B - Live Mode
 
-### Option C — HTML Import (no live Fiverr)
-1. Save gig pages as `.html` (Ctrl+S).
-2. **HTML Import** → upload files.
+1. Create Job -> Live Mode -> enter a niche such as `car wrap`.
+2. If `verification_required` appears, complete verification in the scraper browser, then retry if needed.
 
-## .env (required)
-```
+### Option C - HTML Import
+
+1. Save gig pages as `.html`.
+2. HTML Import -> upload files.
+
+## Client .env Defaults
+
+```env
+MONGODB_URI=mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm
+SCRAPER_ENGINE=python
 SCRAPER_MODE=playwright
 PLAYWRIGHT_HEADLESS=false
 KEEP_BROWSER_PROFILE=true
-PLAYWRIGHT_CHANNEL=chrome
+PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS=0
 ```
-(Use Chrome if installed — often passes verification better than bundled Chromium.)

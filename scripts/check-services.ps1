@@ -1,14 +1,23 @@
-# Quick health check for MongoDB and Redis
+# Quick health check for portable MongoDB and Redis
 $ok = $true
 
-Write-Host "MongoDB..." -NoNewline
+Write-Host "Portable MongoDB..."
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "start-local-mongo.ps1")
+if ($LASTEXITCODE -ne 0) { $ok = $false }
+
+Write-Host "MongoDB connection..." -NoNewline
 try {
-  node -e "const m=require('mongoose');m.connect(process.env.MONGODB_URI||'mongodb://127.0.0.1:27017/fiverr-review-intelligence',{serverSelectionTimeoutMS:5000}).then(()=>{console.log(' OK');return m.disconnect()}).catch(e=>{console.log(' FAIL');process.exit(1)})"
+  $envFile = Join-Path $PSScriptRoot "..\.env"
+  if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+      if ($_ -match "^MONGODB_URI=(.+)$") { $env:MONGODB_URI = $matches[1] }
+    }
+  }
+  node -e "const m=require('mongoose');m.connect(process.env.MONGODB_URI||'mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm',{serverSelectionTimeoutMS:5000}).then(()=>{console.log(' OK');return m.disconnect()}).catch(e=>{console.log(' FAIL');process.exit(1)})"
   if ($LASTEXITCODE -ne 0) { $ok = $false }
 } catch { Write-Host " FAIL"; $ok = $false }
 
 Write-Host "Redis (from .env REDIS_URL)..." -NoNewline
-$envFile = Join-Path $PSScriptRoot "..\.env"
 if (Test-Path $envFile) {
   Get-Content $envFile | ForEach-Object {
     if ($_ -match "^REDIS_URL=(.+)$") { $env:REDIS_URL = $matches[1] }

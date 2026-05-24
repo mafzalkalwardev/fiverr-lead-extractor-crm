@@ -100,6 +100,17 @@ export async function waitForVerificationToClear(
       verificationMessage: "",
     });
     await appendJobLog(jobId, "Verification completed. Continuing extraction...");
+    
+    if (job.currentGigLink) {
+      try {
+        await appendJobLog(jobId, "Redirecting back to target gig URL...");
+        await page.goto(job.currentGigLink, { waitUntil: "domcontentloaded", timeout: 45000 });
+        await sleep(2500);
+      } catch (err) {
+        await appendJobLog(jobId, "Failed to navigate back automatically. Will retry...");
+      }
+    }
+    
     return "cleared";
   }
 }

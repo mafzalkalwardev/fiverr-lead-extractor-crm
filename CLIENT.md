@@ -23,23 +23,22 @@ admin@ftsolutions.local
 Admin@FT2024
 ```
 
-## First-Time Requirements
+## First-Time Setup
 
-Install these before running on a new PC:
+The installer prepares the app automatically:
 
-- Node.js 18 or newer
-- Python 3.11 or newer
-- MongoDB
+- Installs Node.js if needed
+- Installs Python if needed
+- Installs app and scraper packages
+- Starts bundled portable MongoDB
+- Seeds the default admin account
+- Creates the desktop shortcut
 
-From the project folder, run once:
+MongoDB is not installed as a Windows Service. The app uses bundled portable MongoDB and stores data here:
 
-```powershell
-npm install
-python -m venv venv
-venv\Scripts\activate
-pip install -r python_scraper\requirements.txt
-playwright install chromium
-npm run seed:admin
+```text
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\data\db
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\logs\mongod.log
 ```
 
 ## Creating a Job

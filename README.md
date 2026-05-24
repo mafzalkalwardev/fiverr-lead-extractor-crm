@@ -29,7 +29,20 @@ playwright install chromium
 npm run seed:admin
 ```
 
-MongoDB must be running at the `MONGODB_URI` in `.env`.
+The app starts bundled portable MongoDB automatically. It stores local customer data in:
+
+```text
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\data\db
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\logs\mongod.log
+```
+
+The default local database URI is:
+
+```env
+MONGODB_URI=mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm
+```
+
+If port `27017` is already busy, startup uses `27018` and updates `.env` automatically.
 
 Run app and scraper together:
 

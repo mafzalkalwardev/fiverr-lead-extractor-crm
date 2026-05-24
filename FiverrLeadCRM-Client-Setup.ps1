@@ -3,11 +3,20 @@ param(
     [string]$InstallDir = "$env:USERPROFILE\Fiverr Lead Extractor CRM",
     [string]$RepoZipUrl = "https://github.com/mafzalkalwardev/fiverr-lead-extractor-crm/archive/refs/heads/main.zip",
     [switch]$SkipMongoInstall,
+    [switch]$SkipRedisInstall,
     [switch]$NoStart
 )
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$NodeMsiUrl = "https://nodejs.org/dist/v20.18.3/node-v20.18.3-x64.msi"
+$PythonInstallerUrl = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
+$MongoZipUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.15.zip"
+$RedisZipUrl = "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip"
+$LocalMongoUri = "mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm"
+$LocalRedisUrl = "redis://127.0.0.1:6380"
+$LocalDatabaseError = "Local database could not start. Please run app as Administrator once or contact FT Solutions +92307-9670503."
 
 function Write-Step([string]$Message) {
     Write-Host ""
@@ -24,22 +33,27 @@ function Add-PathIfExists([string]$Path) {
     }
 }
 
-function Ensure-WingetPackage([string]$Id, [string]$Name) {
-    if (-not (Test-Command "winget")) {
-        throw "winget is required to install $Name automatically. Install App Installer from Microsoft Store, then run setup again."
+function Invoke-DownloadFile([string]$Uri, [string]$OutFile, [string]$Name) {
+    Write-Host "Downloading $Name..."
+    Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+    if (-not (Test-Path -LiteralPath $OutFile)) {
+        throw "Download failed for $Name."
     }
+}
 
-    Write-Step "Checking $Name"
-    $installed = winget list --exact --id $Id --accept-source-agreements 2>$null
-    if ($LASTEXITCODE -eq 0 -and ($installed -match [regex]::Escape($Id))) {
-        Write-Host "$Name already installed." -ForegroundColor Green
-        return
-    }
-
+function Install-Msi([string]$MsiPath, [string]$Name) {
     Write-Host "Installing $Name..."
-    winget install --exact --id $Id --silent --accept-package-agreements --accept-source-agreements
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to install $Name with winget package id $Id."
+    $p = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", "`"$MsiPath`"", "/qn", "/norestart") -Wait -PassThru
+    if ($p.ExitCode -notin @(0, 3010)) {
+        throw "$Name installer failed with exit code $($p.ExitCode)."
+    }
+}
+
+function Install-Exe([string]$ExePath, [string[]]$Arguments, [string]$Name) {
+    Write-Host "Installing $Name..."
+    $p = Start-Process -FilePath $ExePath -ArgumentList $Arguments -Wait -PassThru
+    if ($p.ExitCode -notin @(0, 3010)) {
+        throw "$Name installer failed with exit code $($p.ExitCode)."
     }
 }
 
@@ -47,7 +61,9 @@ function Ensure-Node {
     Add-PathIfExists "$env:ProgramFiles\nodejs"
     Add-PathIfExists "$env:LocalAppData\Programs\node"
     if (-not (Test-Command "node")) {
-        Ensure-WingetPackage "OpenJS.NodeJS.LTS" "Node.js LTS"
+        $nodeMsi = Join-Path $env:TEMP "fiverr-crm-node-lts.msi"
+        Invoke-DownloadFile -Uri $NodeMsiUrl -OutFile $nodeMsi -Name "Node.js LTS"
+        Install-Msi -MsiPath $nodeMsi -Name "Node.js LTS"
         Add-PathIfExists "$env:ProgramFiles\nodejs"
         Add-PathIfExists "$env:LocalAppData\Programs\node"
     }
@@ -55,35 +71,140 @@ function Ensure-Node {
 }
 
 function Ensure-Python {
+    Add-PathIfExists "$env:ProgramFiles\Python312"
+    Add-PathIfExists "$env:ProgramFiles\Python312\Scripts"
+    Add-PathIfExists "$env:LocalAppData\Programs\Python\Python312"
+    Add-PathIfExists "$env:LocalAppData\Programs\Python\Python312\Scripts"
     if ((Test-Command "py") -or (Test-Command "python")) {
         return
     }
-    Ensure-WingetPackage "Python.Python.3.12" "Python 3.12"
+
+    $pythonExe = Join-Path $env:TEMP "fiverr-crm-python-3.12.exe"
+    Invoke-DownloadFile -Uri $PythonInstallerUrl -OutFile $pythonExe -Name "Python 3.12"
+    Install-Exe -ExePath $pythonExe -Arguments @(
+        "/quiet",
+        "InstallAllUsers=1",
+        "PrependPath=1",
+        "Include_launcher=1",
+        "Include_test=0"
+    ) -Name "Python 3.12"
+    Add-PathIfExists "$env:ProgramFiles\Python312"
+    Add-PathIfExists "$env:ProgramFiles\Python312\Scripts"
     Add-PathIfExists "$env:LocalAppData\Programs\Python\Python312"
     Add-PathIfExists "$env:LocalAppData\Programs\Python\Python312\Scripts"
 }
 
-function Ensure-MongoDb {
-    if ($SkipMongoInstall) {
-        Write-Host "Skipping MongoDB install by request." -ForegroundColor Yellow
+function Get-PortableMongodPath {
+    $candidates = @(
+        (Join-Path $InstallDir "tools\mongodb\bin\mongod.exe"),
+        (Join-Path $InstallDir "mongodb\bin\mongod.exe"),
+        (Join-Path $InstallDir "vendor\mongodb\bin\mongod.exe"),
+        (Join-Path $InstallDir "resources\mongodb\bin\mongod.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    return $null
+}
+
+function Ensure-PortableMongoDb {
+    if (Get-PortableMongodPath) {
+        Write-Host "Portable MongoDB already bundled." -ForegroundColor Green
         return
     }
 
-    $svc = Get-Service -Name "MongoDB" -ErrorAction SilentlyContinue
-    if (-not $svc) {
-        try {
-            Ensure-WingetPackage "MongoDB.Server" "MongoDB Community Server"
-            $svc = Get-Service -Name "MongoDB" -ErrorAction SilentlyContinue
-        } catch {
-            Write-Host "MongoDB auto-install failed: $($_.Exception.Message)" -ForegroundColor Yellow
-            Write-Host "If you use MongoDB Atlas, put that URI in $InstallDir\.env after setup." -ForegroundColor Yellow
-            return
-        }
+    if ($SkipMongoInstall) {
+        Write-Host "Skipping portable MongoDB download by request." -ForegroundColor Yellow
+        return
     }
 
-    if ($svc -and $svc.Status -ne "Running") {
-        Write-Host "Starting MongoDB service..."
-        Start-Service -Name "MongoDB"
+    $mongoTemp = Join-Path $env:TEMP ("fiverr-crm-mongodb-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $mongoTemp -Force | Out-Null
+    try {
+        $zipPath = Join-Path $mongoTemp "mongodb.zip"
+        $extractDir = Join-Path $mongoTemp "extract"
+        Invoke-DownloadFile -Uri $MongoZipUrl -OutFile $zipPath -Name "portable MongoDB"
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+
+        $mongod = Get-ChildItem -Path $extractDir -Recurse -Filter "mongod.exe" | Select-Object -First 1
+        if (-not $mongod) {
+            throw "MongoDB ZIP did not contain mongod.exe."
+        }
+
+        $sourceRoot = Split-Path -Parent (Split-Path -Parent $mongod.FullName)
+        $targetRoot = Join-Path $InstallDir "tools\mongodb"
+        $resolvedInstall = (Resolve-Path -LiteralPath $InstallDir).Path.TrimEnd("\")
+        $targetParent = Split-Path -Parent $targetRoot
+        if (-not (Test-Path -LiteralPath $targetParent)) {
+            New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
+        }
+        if ((Test-Path -LiteralPath $targetRoot) -and ((Resolve-Path -LiteralPath $targetRoot).Path -notlike "$resolvedInstall*")) {
+            throw "Refusing to replace unexpected MongoDB folder: $targetRoot"
+        }
+        if (Test-Path -LiteralPath $targetRoot) {
+            Remove-Item -LiteralPath $targetRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+        Copy-Item -Path (Join-Path $sourceRoot "*") -Destination $targetRoot -Recurse -Force
+        Write-Host "Portable MongoDB bundled at $targetRoot" -ForegroundColor Green
+    } finally {
+        if (Test-Path -LiteralPath $mongoTemp) {
+            Remove-Item -LiteralPath $mongoTemp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Ensure-PortableRedis {
+    $redisDir = Join-Path $InstallDir "tools\redis5"
+    $redisExe = Join-Path $redisDir "redis-server.exe"
+
+    if (Test-Path -LiteralPath $redisExe) {
+        Write-Host "Portable Redis already bundled." -ForegroundColor Green
+        return
+    }
+
+    if ($SkipRedisInstall) {
+        Write-Host "Skipping portable Redis download by request." -ForegroundColor Yellow
+        return
+    }
+
+    $redisTemp = Join-Path $env:TEMP ("fiverr-crm-redis-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $redisTemp -Force | Out-Null
+    try {
+        $zipPath = Join-Path $redisTemp "redis.zip"
+        $extractDir = Join-Path $redisTemp "extract"
+        Invoke-DownloadFile -Uri $RedisZipUrl -OutFile $zipPath -Name "portable Redis 5"
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+
+        $redisServer = Get-ChildItem -Path $extractDir -Recurse -Filter "redis-server.exe" | Select-Object -First 1
+        if (-not $redisServer) {
+            throw "Redis ZIP did not contain redis-server.exe."
+        }
+
+        $sourceDir = Split-Path -Parent $redisServer.FullName
+        if (-not (Test-Path -LiteralPath $redisDir)) {
+            New-Item -ItemType Directory -Path $redisDir -Force | Out-Null
+        }
+        Copy-Item -Path (Join-Path $sourceDir "*") -Destination $redisDir -Recurse -Force
+        Write-Host "Portable Redis bundled at $redisDir" -ForegroundColor Green
+    } finally {
+        if (Test-Path -LiteralPath $redisTemp) {
+            Remove-Item -LiteralPath $redisTemp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Start-PortableRedis {
+    $scriptPath = Join-Path $InstallDir "scripts\start-redis5.ps1"
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        Write-Host "Warning: scripts\start-redis5.ps1 not found; skipping Redis start." -ForegroundColor Yellow
+        return
+    }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Warning: Redis could not start. The app may run but job stop may fail." -ForegroundColor Yellow
     }
 }
 
@@ -130,6 +251,63 @@ function Copy-AppSource([string]$SourceDir, [string]$TargetDir) {
     $global:LASTEXITCODE = 0
 }
 
+function Set-EnvFileValue([string]$EnvFile, [string]$Key, [string]$Value) {
+    if (-not (Test-Path -LiteralPath $EnvFile)) {
+        "$Key=$Value" | Set-Content -LiteralPath $EnvFile -Encoding UTF8
+        return
+    }
+
+    $lines = [Collections.Generic.List[string]]::new()
+    $found = $false
+    foreach ($line in [IO.File]::ReadAllLines($EnvFile)) {
+        if ($line -match "^\s*$([regex]::Escape($Key))=") {
+            $lines.Add("$Key=$Value")
+            $found = $true
+        } else {
+            $lines.Add($line)
+        }
+    }
+    if (-not $found) {
+        $lines.Add("$Key=$Value")
+    }
+    [IO.File]::WriteAllLines($EnvFile, $lines, [Text.UTF8Encoding]::new($false))
+}
+
+function Get-EnvFileValue([string]$EnvFile, [string]$Key) {
+    if (-not (Test-Path -LiteralPath $EnvFile)) {
+        return $null
+    }
+
+    foreach ($line in [IO.File]::ReadAllLines($EnvFile)) {
+        $index = $line.IndexOf("=")
+        if ($index -le 0) {
+            continue
+        }
+        if ($line.Substring(0, $index).Trim().ToUpperInvariant() -eq $Key.ToUpperInvariant()) {
+            return $line.Substring($index + 1).Trim()
+        }
+    }
+    return $null
+}
+
+function Start-PortableMongoDb {
+    $scriptPath = Join-Path $InstallDir "scripts\start-local-mongo.ps1"
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        throw "Missing scripts\start-local-mongo.ps1."
+    }
+
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -RootDir $InstallDir
+    if ($LASTEXITCODE -ne 0) {
+        throw $LocalDatabaseError
+    }
+
+    $envFile = Join-Path $InstallDir ".env"
+    $uri = Get-EnvFileValue -EnvFile $envFile -Key "MONGODB_URI"
+    if ($uri) {
+        $env:MONGODB_URI = $uri
+    }
+}
+
 function Ensure-EnvFile {
     $envFile = Join-Path $InstallDir ".env"
     if (-not (Test-Path $envFile)) {
@@ -138,6 +316,7 @@ function Ensure-EnvFile {
         $secret = [Convert]::ToBase64String($bytes)
         @"
 MONGODB_URI=mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm
+REDIS_URL=redis://127.0.0.1:6380
 JWT_SECRET=$secret
 SCRAPER_ENGINE=python
 NEXT_PUBLIC_CLIENT_MODE=true
@@ -152,6 +331,8 @@ PYTHON_VERIFICATION_TIMEOUT_SEC=900
 
     $text = Get-Content -LiteralPath $envFile -Raw
     $required = @{
+        "MONGODB_URI" = $LocalMongoUri
+        "REDIS_URL" = $LocalRedisUrl
         "SCRAPER_ENGINE" = "python"
         "NEXT_PUBLIC_CLIENT_MODE" = "true"
         "PLAYWRIGHT_HEADLESS" = "false"
@@ -161,7 +342,9 @@ PYTHON_VERIFICATION_TIMEOUT_SEC=900
         "PYTHON_VERIFICATION_TIMEOUT_SEC" = "900"
     }
     foreach ($key in $required.Keys) {
-        if ($text -notmatch "(?m)^$([regex]::Escape($key))=") {
+        if ($key -in @("MONGODB_URI", "REDIS_URL")) {
+            Set-EnvFileValue -EnvFile $envFile -Key $key -Value $required[$key]
+        } elseif ($text -notmatch "(?m)^$([regex]::Escape($key))=") {
             Add-Content -LiteralPath $envFile -Value "$key=$($required[$key])"
         }
     }
@@ -194,7 +377,6 @@ try {
     Write-Step "Installing prerequisites"
     Ensure-Node
     Ensure-Python
-    Ensure-MongoDb
 
     Write-Step "Downloading latest app"
     $tempRoot = Join-Path $env:TEMP ("fiverr-crm-setup-" + [guid]::NewGuid().ToString("N"))
@@ -229,12 +411,17 @@ try {
     Invoke-Checked { & $venvPython -m pip install -r "python_scraper\requirements.txt" } "pip install"
     Invoke-Checked { & $venvPython -m playwright install chromium } "playwright browser install"
 
+    Write-Step "Preparing portable local MongoDB"
+    Ensure-PortableMongoDb
+    Start-PortableMongoDb
+
+    Write-Step "Preparing portable Redis 5"
+    Ensure-PortableRedis
+    Start-PortableRedis
+
     Write-Step "Preparing admin account"
-    try {
-        Invoke-Checked { npm run seed:admin } "admin seed"
-    } catch {
-        Write-Host "Admin seed failed. Start MongoDB, then run npm run seed:admin in $InstallDir." -ForegroundColor Yellow
-    }
+    Invoke-Checked { npm run seed:admin } "admin seed"
+    Write-Host "[mongo] admin seeded" -ForegroundColor Green
 
     Write-Step "Creating shortcut and startup task"
     Ensure-ShortcutAndStartup

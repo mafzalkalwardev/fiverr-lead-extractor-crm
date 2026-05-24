@@ -40,7 +40,14 @@ The current repo already has an Electron shell, but packaging this app properly 
 - A Python runtime or prepared venv
 - Playwright Chromium
 - The configured `.env`
-- MongoDB access, usually MongoDB Atlas
+- Portable MongoDB at `tools\mongodb\bin\mongod.exe`
+
+Do not depend on MongoDB Atlas, MongoDB Compass, winget, or the MongoDB Windows Service for local customer delivery. Startup should run `scripts\start-local-mongo.ps1`, which uses:
+
+```text
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\data\db
+C:\Users\<User>\AppData\Local\FiverrLeadCRM\logs\mongod.log
+```
 
 After packaging, the client should only see an app icon/login screen. They should not receive `.ts`, `.tsx`, `.py`, `.env`, or project folders.
 

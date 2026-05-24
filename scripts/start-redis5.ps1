@@ -1,4 +1,4 @@
-# Start Redis 5+ on port 6380 (BullMQ requires Redis >= 5; winget Redis.Redis is 3.x)
+# Start portable Redis 5+ on port 6380 for legacy BullMQ support.
 $redisDir = Join-Path $PSScriptRoot "..\tools\redis5"
 $exe = Join-Path $redisDir "redis-server.exe"
 if (-not (Test-Path $exe)) {

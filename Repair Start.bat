@@ -20,6 +20,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Starting portable local MongoDB...
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start-local-mongo.ps1
+if errorlevel 1 (
+  echo Local database could not start. Please run app as Administrator once or contact FT Solutions +92307-9670503.
+  pause
+  exit /b 1
+)
+
+echo Starting portable Redis 5...
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start-redis5.ps1
+
 start "Open Login" cmd /c "powershell -ExecutionPolicy Bypass -NoProfile -File scripts\open-login.ps1"
 
 call npm.cmd run client:repair

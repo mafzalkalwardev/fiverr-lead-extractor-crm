@@ -30,8 +30,12 @@ export async function POST(
     await logActivity("job_stopped", `Job ${id} stopped`, user._id);
     await appendJobLog(id, "Manual stop requested. Worker will close the persistent browser session.");
 
-    const redis = createRedisConnection();
-    await redis.set("browser:shutdown", `manual stop:${id}`, "EX", 60).finally(() => redis.quit());
+    try {
+      const redis = createRedisConnection();
+      await redis.set("browser:shutdown", `manual stop:${id}`, "EX", 60).finally(() => redis.quit());
+    } catch {
+      // Redis unavailable (Python scraper mode) — job status already updated in MongoDB
+    }
 
     return NextResponse.json({ job });
   } catch (err) {

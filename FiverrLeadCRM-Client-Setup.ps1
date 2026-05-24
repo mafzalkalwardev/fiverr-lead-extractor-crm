@@ -40,7 +40,7 @@ function Invoke-DownloadFile([string]$Uri, [string]$OutFile, [string]$Name) {
     try {
         $wc.DownloadFile($Uri, $OutFile)
     } catch {
-        throw "Download failed for $Name from $Uri — $($_.Exception.Message)"
+        throw "Download failed for $Name from $Uri - $($_.Exception.Message)"
     } finally {
         $wc.Dispose()
     }
@@ -136,6 +136,26 @@ function Get-PortableMongodPath {
         }
     }
     return $null
+}
+
+function Get-SystemMongodPath {
+    $cmd = Get-Command "mongod" -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($ver in @("8.0","7.0","6.0","5.0","4.4")) {
+        $p = "C:\Program Files\MongoDB\Server\$ver\bin\mongod.exe"
+        if (Test-Path $p) { return $p }
+    }
+    return $null
+}
+
+function Test-PortOpen([int]$Port) {
+    $tc = New-Object Net.Sockets.TcpClient
+    try {
+        $iar = $tc.BeginConnect("127.0.0.1", $Port, $null, $null)
+        $ok = $iar.AsyncWaitHandle.WaitOne(600, $false)
+        if ($ok) { $tc.EndConnect($iar) }
+        return $ok
+    } catch { return $false } finally { $tc.Close() }
 }
 
 function Ensure-PortableMongoDb {
@@ -439,7 +459,11 @@ try {
 
     Write-Step "Installing Node packages"
     Set-Location $InstallDir
-    Invoke-Checked { npm install } "npm install"
+    if (Test-Path (Join-Path $InstallDir "node_modules\next")) {
+        Write-Host "node_modules already installed, skipping npm install." -ForegroundColor Green
+    } else {
+        Invoke-Checked { npm install } "npm install"
+    }
 
     Write-Step "Installing Python packages"
     if (-not (Test-Path (Join-Path $InstallDir "venv\Scripts\python.exe"))) {
@@ -450,27 +474,68 @@ try {
         }
     }
     $venvPython = Join-Path $InstallDir "venv\Scripts\python.exe"
-    Invoke-Checked { & $venvPython -m pip install --upgrade pip } "pip upgrade"
-    Invoke-Checked { & $venvPython -m pip install -r "python_scraper\requirements.txt" } "pip install"
-    Invoke-Checked { & $venvPython -m playwright install chromium } "playwright browser install"
-
-    Write-Step "Installing Visual C++ 2022 Runtime (required by MongoDB)"
-    Ensure-VCRuntime
-
-    Write-Step "Preparing portable local MongoDB"
-    Ensure-PortableMongoDb
-
-    $mongodExe = Join-Path $InstallDir "tools\mongodb\bin\mongod.exe"
-    if (-not (Test-Path -LiteralPath $mongodExe)) {
-        throw "MongoDB download succeeded but mongod.exe was not found at expected path: $mongodExe"
+    $playwrightInstalled = Test-Path (Join-Path $InstallDir "venv\Lib\site-packages\playwright")
+    if (-not $playwrightInstalled) {
+        Invoke-Checked { & $venvPython -m pip install --upgrade pip } "pip upgrade"
+        Invoke-Checked { & $venvPython -m pip install -r "python_scraper\requirements.txt" } "pip install"
+        Invoke-Checked { & $venvPython -m playwright install chromium } "playwright browser install"
+    } else {
+        Write-Host "Python packages already installed, skipping pip install." -ForegroundColor Green
     }
-    $mongodVersion = & $mongodExe --version 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "mongod.exe failed to run. Verify Visual C++ 2022 Runtime is installed. Details: $mongodVersion"
-    }
-    Write-Host "mongod.exe OK: $($mongodVersion | Select-Object -First 1)" -ForegroundColor Green
 
-    Start-PortableMongoDb
+    Write-Step "Setting up MongoDB"
+    $mongodPortable = Get-PortableMongodPath
+    $mongodSystem = Get-SystemMongodPath
+
+    if ($mongodPortable) {
+        Write-Host "Portable MongoDB already bundled: $mongodPortable" -ForegroundColor Green
+    } elseif ($mongodSystem) {
+        Write-Host "Found system MongoDB: $mongodSystem" -ForegroundColor Green
+        $env:FIVERR_MONGOD_EXE = $mongodSystem
+    } elseif (Test-PortOpen -Port 27017) {
+        Write-Host "MongoDB already listening on port 27017, skipping install." -ForegroundColor Green
+    } else {
+        $wingetOk = $false
+        if (Get-Command "winget" -ErrorAction SilentlyContinue) {
+            Write-Host "Trying winget install MongoDB.Server (fast, no VC++ worries)..."
+            winget install -e --id MongoDB.Server --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "MongoDB installed via winget." -ForegroundColor Green
+                foreach ($ver in @("8.0","7.0","6.0")) {
+                    Add-PathIfExists "C:\Program Files\MongoDB\Server\$ver\bin"
+                }
+                $found = Get-SystemMongodPath
+                if ($found) { $env:FIVERR_MONGOD_EXE = $found }
+                $wingetOk = $true
+            } else {
+                Write-Host "winget install failed, falling back to portable ZIP download." -ForegroundColor Yellow
+            }
+        }
+        if (-not $wingetOk) {
+            Write-Step "Installing Visual C++ 2022 Runtime (required by MongoDB)"
+            Ensure-VCRuntime
+            Write-Step "Downloading portable MongoDB (large download, please wait)"
+            Ensure-PortableMongoDb
+        }
+    }
+
+    $resolvedMongod = if ($env:FIVERR_MONGOD_EXE) { $env:FIVERR_MONGOD_EXE } else { Get-PortableMongodPath }
+    if ($resolvedMongod -and (Test-Path -LiteralPath $resolvedMongod)) {
+        $mongodVersion = & $resolvedMongod --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "mongod OK: $($mongodVersion | Select-Object -First 1)" -ForegroundColor Green
+        } else {
+            Write-Host "Warning: mongod.exe self-test returned non-zero (possible missing VC++ runtime). Will attempt to start anyway." -ForegroundColor Yellow
+        }
+    } elseif (-not (Test-PortOpen -Port 27017)) {
+        Write-Host "Warning: mongod.exe not found and port 27017 not open. MongoDB may fail to start." -ForegroundColor Yellow
+    }
+
+    if (-not (Test-PortOpen -Port 27017)) {
+        Start-PortableMongoDb
+    } else {
+        Write-Host "MongoDB already running, skipping start." -ForegroundColor Green
+    }
 
     Write-Step "Preparing portable Redis 5"
     Ensure-PortableRedis

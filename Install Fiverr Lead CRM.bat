@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions
+chcp 65001 >nul
 title Install Fiverr Lead CRM
 cd /d "%~dp0"
 

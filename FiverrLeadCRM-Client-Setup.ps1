@@ -34,11 +34,21 @@ function Add-PathIfExists([string]$Path) {
 }
 
 function Invoke-DownloadFile([string]$Uri, [string]$OutFile, [string]$Name) {
-    Write-Host "Downloading $Name..."
-    Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
-    if (-not (Test-Path -LiteralPath $OutFile)) {
-        throw "Download failed for $Name."
+    Write-Host "Downloading $Name (may take several minutes for large files)..."
+    $wc = New-Object System.Net.WebClient
+    $wc.Headers.Add("User-Agent", "Mozilla/5.0 FiverrLeadCRM-Setup")
+    try {
+        $wc.DownloadFile($Uri, $OutFile)
+    } catch {
+        throw "Download failed for $Name from $Uri — $($_.Exception.Message)"
+    } finally {
+        $wc.Dispose()
     }
+    if (-not (Test-Path -LiteralPath $OutFile) -or (Get-Item -LiteralPath $OutFile).Length -eq 0) {
+        throw "Download produced empty file for $Name."
+    }
+    $sizeMB = [math]::Round((Get-Item -LiteralPath $OutFile).Length / 1MB, 1)
+    Write-Host "Downloaded $Name ($sizeMB MB)" -ForegroundColor Green
 }
 
 function Install-Msi([string]$MsiPath, [string]$Name) {
@@ -92,6 +102,25 @@ function Ensure-Python {
     Add-PathIfExists "$env:ProgramFiles\Python312\Scripts"
     Add-PathIfExists "$env:LocalAppData\Programs\Python\Python312"
     Add-PathIfExists "$env:LocalAppData\Programs\Python\Python312\Scripts"
+}
+
+function Ensure-VCRuntime {
+    $sys32 = "$env:SystemRoot\System32"
+    $dll1 = Join-Path $sys32 "vcruntime140.dll"
+    $dll2 = Join-Path $sys32 "vcruntime140_1.dll"
+    if ((Test-Path $dll1) -and (Test-Path $dll2)) {
+        Write-Host "Visual C++ Runtime already present." -ForegroundColor Green
+        return
+    }
+    $vcExe = Join-Path $env:TEMP "fiverr-crm-vcredist.exe"
+    Invoke-DownloadFile -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile $vcExe -Name "Visual C++ 2022 Runtime"
+    Write-Host "Installing Visual C++ 2022 Runtime..."
+    $p = Start-Process -FilePath $vcExe -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
+    if ($p.ExitCode -notin @(0, 3010, 1638)) {
+        Write-Host "Warning: VC++ Runtime installer returned exit code $($p.ExitCode). MongoDB may fail to start." -ForegroundColor Yellow
+    } else {
+        Write-Host "Visual C++ 2022 Runtime installed." -ForegroundColor Green
+    }
 }
 
 function Get-PortableMongodPath {
@@ -315,16 +344,23 @@ function Ensure-EnvFile {
         [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
         $secret = [Convert]::ToBase64String($bytes)
         @"
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NODE_ENV=development
 MONGODB_URI=mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm
 REDIS_URL=redis://127.0.0.1:6380
 JWT_SECRET=$secret
 SCRAPER_ENGINE=python
+SCRAPER_MODE=playwright
 NEXT_PUBLIC_CLIENT_MODE=true
 PLAYWRIGHT_HEADLESS=false
 KEEP_BROWSER_PROFILE=true
 FOCUS_BROWSER_ON_VERIFICATION=true
 PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS=0
 PYTHON_VERIFICATION_TIMEOUT_SEC=900
+DEFAULT_DELAY_SECONDS=1
+MAX_RETRIES=3
+BROWSER_WINDOW_WIDTH=1440
+BROWSER_WINDOW_HEIGHT=900
 "@ | Set-Content -LiteralPath $envFile -Encoding UTF8
         return
     }
@@ -333,16 +369,23 @@ PYTHON_VERIFICATION_TIMEOUT_SEC=900
     $required = @{
         "MONGODB_URI" = $LocalMongoUri
         "REDIS_URL" = $LocalRedisUrl
+        "NEXT_PUBLIC_APP_URL" = "http://localhost:3000"
+        "NODE_ENV" = "development"
         "SCRAPER_ENGINE" = "python"
+        "SCRAPER_MODE" = "playwright"
         "NEXT_PUBLIC_CLIENT_MODE" = "true"
         "PLAYWRIGHT_HEADLESS" = "false"
         "KEEP_BROWSER_PROFILE" = "true"
         "FOCUS_BROWSER_ON_VERIFICATION" = "true"
         "PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS" = "0"
         "PYTHON_VERIFICATION_TIMEOUT_SEC" = "900"
+        "DEFAULT_DELAY_SECONDS" = "1"
+        "MAX_RETRIES" = "3"
+        "BROWSER_WINDOW_WIDTH" = "1440"
+        "BROWSER_WINDOW_HEIGHT" = "900"
     }
     foreach ($key in $required.Keys) {
-        if ($key -in @("MONGODB_URI", "REDIS_URL")) {
+        if ($key -in @("MONGODB_URI", "REDIS_URL", "NEXT_PUBLIC_APP_URL", "NODE_ENV")) {
             Set-EnvFileValue -EnvFile $envFile -Key $key -Value $required[$key]
         } elseif ($text -notmatch "(?m)^$([regex]::Escape($key))=") {
             Add-Content -LiteralPath $envFile -Value "$key=$($required[$key])"
@@ -411,8 +454,22 @@ try {
     Invoke-Checked { & $venvPython -m pip install -r "python_scraper\requirements.txt" } "pip install"
     Invoke-Checked { & $venvPython -m playwright install chromium } "playwright browser install"
 
+    Write-Step "Installing Visual C++ 2022 Runtime (required by MongoDB)"
+    Ensure-VCRuntime
+
     Write-Step "Preparing portable local MongoDB"
     Ensure-PortableMongoDb
+
+    $mongodExe = Join-Path $InstallDir "tools\mongodb\bin\mongod.exe"
+    if (-not (Test-Path -LiteralPath $mongodExe)) {
+        throw "MongoDB download succeeded but mongod.exe was not found at expected path: $mongodExe"
+    }
+    $mongodVersion = & $mongodExe --version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "mongod.exe failed to run. Verify Visual C++ 2022 Runtime is installed. Details: $mongodVersion"
+    }
+    Write-Host "mongod.exe OK: $($mongodVersion | Select-Object -First 1)" -ForegroundColor Green
+
     Start-PortableMongoDb
 
     Write-Step "Preparing portable Redis 5"

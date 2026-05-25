@@ -305,20 +305,48 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                     main_gig_image=gig.get("mainGigImage") or "",
                 )
 
-                append_activity(
-                    job_id,
-                    f"Gig {i + 1}/{len(queue)} done · seller={seller_label} · {len(reviews)} leads "
-                    f"({checked} reviews scanned)",
-                )
-
                 state["gigs_scanned"] += 1
                 state["reviews_checked"] += checked
+                leads_before = state["us_leads"] + state["canada_leads"]
                 await _save_reviews(job, job_id, gig, reviews, state)
+                leads_after = state["us_leads"] + state["canada_leads"]
+                append_activity(
+                    job_id,
+                    f"Gig {i + 1}/{len(queue)} done: seller={seller_label}; "
+                    f"{len(reviews)} qualified reviews; {checked} reviews scanned",
+                )
+                append_activity(job_id, f"Leads saved for gig: {leads_after - leads_before}")
                 clear_failed_url(job_id, gig_url)
                 state["resume_index"] = i + 1
                 refresh_job_counters(job_id, state)
 
-            except VerificationRequiredError:
+            except VerificationRequiredError as err:
+                if getattr(err, "timed_out", False):
+                    state["failed_gigs"] += 1
+                    err_msg = str(err).encode("ascii", errors="replace").decode("ascii")
+                    artifacts = await _save_failure_artifacts(page, job_id, gig_url)
+                    artifact_msg = f" {artifacts}" if artifacts else ""
+                    reason = f"{err_msg}{artifact_msg}"
+                    push_error(job_id, f"{gig_url}: {reason}")
+                    record_failed_url(job_id, gig_url, reason)
+                    state.setdefault("failed_urls", []).append(gig_url)
+                    append_activity(
+                        job_id,
+                        f"Verification timed out for gig; saved artifacts and continuing: {gig_url}",
+                    )
+                    update_job(
+                        job_id,
+                        {
+                            "status": "extracting_reviews",
+                            "verificationMessage": "",
+                            "resumeIndex": i + 1,
+                            "gigQueue": queue,
+                        },
+                    )
+                    state["resume_index"] = i + 1
+                    refresh_job_counters(job_id, state)
+                    continue
+
                 update_job(
                     job_id,
                     {

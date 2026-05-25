@@ -59,10 +59,14 @@ STALE_RUNNING_MINUTES = int(os.getenv("PYTHON_STALE_JOB_MINUTES", "2"))
 MAX_SEARCH_PAGES = int(os.getenv("MAX_PAGES_LIMIT", "0"))
 MAX_SEARCH_PAGES_SAFETY = int(os.getenv("MAX_SEARCH_PAGES_SAFETY", "100"))
 PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "8"))
-# Human verification must be completed by the client in the opened browser.
-# The scraper only waits, keeps the session alive, and resumes after it clears.
-AUTO_VERIFICATION_MAX_ATTEMPTS = 0
-AUTO_VERIFICATION_RECHECK_SEC = float(os.getenv("PYTHON_AUTO_VERIFICATION_RECHECK_SEC", "5"))
+# Page-scoped Playwright mouse only. OS-level mouse automation stays off unless
+# ALLOW_OS_MOUSE_AUTOMATION is explicitly enabled below.
+AUTO_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS", "8"))
+AUTO_VERIFICATION_RECHECK_SEC = float(os.getenv("PYTHON_AUTO_VERIFICATION_RECHECK_SEC", "2"))
+AUTO_VERIFICATION_RETRY_INTERVAL_SEC = float(
+    os.getenv("PYTHON_AUTO_VERIFICATION_RETRY_INTERVAL_SEC", "35")
+)
+REVIEW_MAX_PAGES = int(os.getenv("REVIEW_MAX_PAGES", "50"))
 MAX_FAILED_URL_RETRY_PASSES = int(os.getenv("MAX_FAILED_URL_RETRY_PASSES", "1"))
 
 # Safety defaults — OS mouse stays off; page-scoped Playwright mouse is used.

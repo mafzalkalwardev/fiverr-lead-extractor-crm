@@ -461,17 +461,14 @@ async def _simulate_human_reading(page: Page, target_x: Optional[float] = None, 
 
 
 # ---------------------------------------------------------------------------
-# Client-safe verification entry point
+# Main press-and-hold entry point
 # ---------------------------------------------------------------------------
 async def try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:
-    print("[verification] Automatic press-and-hold is disabled; waiting for client verification")
-    await prepare_verification_ui(page)
-    return False
+    return await _legacy_try_press_and_hold(page, hold_seconds)
 
 
 async def assist_verification_loop(page: Page, max_attempts: int = 10) -> bool:
-    await prepare_verification_ui(page)
-    return False
+    return await _legacy_assist_verification_loop(page, max_attempts)
 
 
 async def _legacy_try_press_and_hold(page: Page, hold_seconds: float = 8.0) -> bool:

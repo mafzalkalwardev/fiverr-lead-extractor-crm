@@ -22,7 +22,8 @@ console.log("[scraper] Python service starting (browser opens when you create a 
 const env = {
   ...process.env,
   PYTHONDONTWRITEBYTECODE: "1",
-  PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS: "0",
+  PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS:
+    process.env.PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS || "8",
   ALLOW_OS_MOUSE_AUTOMATION: "false",
   FOCUS_BROWSER_ON_VERIFICATION: process.env.FOCUS_BROWSER_ON_VERIFICATION || "true",
 };

@@ -738,8 +738,16 @@ async def extract_reviews(
     await scroll_to_reviews(page)
     review_page = 1
     total_load_clicks = 0
+    seen_page_signatures: set[str] = set()
 
     while True:
+        if review_page > max(1, config.REVIEW_MAX_PAGES):
+            append_activity(
+                job_id,
+                f"Review pagination stopped at safety limit ({config.REVIEW_MAX_PAGES} pages)",
+            )
+            break
+
         update_job(
             job_id,
             {
@@ -762,6 +770,15 @@ async def extract_reviews(
             job_id,
             f"Review page {review_page}: {len(candidates)} review block(s) found",
         )
+        signature = "|".join(clean_text(text)[:120].lower() for _card, text in candidates[:10])
+        if signature and signature in seen_page_signatures:
+            append_activity(
+                job_id,
+                f"Review page {review_page}: repeated page content detected; stopping pagination",
+            )
+            break
+        if signature:
+            seen_page_signatures.add(signature)
 
         kept_before_page = len(parsed)
 

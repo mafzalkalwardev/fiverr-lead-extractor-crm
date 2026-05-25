@@ -3,13 +3,18 @@ import { saveLeadIfQualified, countLeadByCountry } from "@/lib/leads";
 import { VERIFICATION_MESSAGE } from "@/lib/extraction-modes";
 import { appendJobLog } from "@/lib/jobLog";
 import ScrapeJob from "@/models/ScrapeJob";
+import GigProgress from "@/models/GigProgress";
 import type { IScrapeJob } from "@/models/ScrapeJob";
 import {
   ScraperBlockedError,
   ScraperVerificationRequiredError,
 } from "@/scraper/types";
 import type { ScraperAdapter } from "@/scraper/types";
-import { getOrCreatePage, isBrowserClosedError, pauseWithoutClosing } from "@/scraper/live/browser";
+import {
+  getOrCreatePage,
+  isBrowserClosedError,
+  pauseWithoutClosing,
+} from "@/scraper/live/browser";
 import { waitForVerificationToClear } from "@/scraper/live/verification";
 
 export interface GigProcessorState {
@@ -75,6 +80,76 @@ async function waitForFiverrVerification(params: {
   return "cleared";
 }
 
+/** Mark a gig as currently being processed */
+async function markGigProcessing(jobId: string, index: number): Promise<void> {
+  try {
+    await GigProgress.findOneAndUpdate(
+      { jobId, index },
+      { $set: { status: "processing", startedAt: new Date() } }
+    );
+  } catch {
+    /* best-effort — job still proceeds without per-gig tracking */
+  }
+}
+
+/** Mark a gig as successfully completed */
+async function markGigCompleted(
+  jobId: string,
+  index: number,
+  reviewsParsed: number,
+  leadsFound: number
+): Promise<void> {
+  try {
+    await GigProgress.findOneAndUpdate(
+      { jobId, index },
+      {
+        $set: {
+          status: "completed",
+          completedAt: new Date(),
+          reviewsParsed,
+          leadsFound,
+        },
+      }
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Mark a gig as failed and increment its retry counter */
+async function markGigFailed(
+  jobId: string,
+  index: number,
+  error: string
+): Promise<void> {
+  try {
+    await GigProgress.findOneAndUpdate(
+      { jobId, index },
+      {
+        $set: { status: "failed", lastError: error.slice(0, 500) },
+        $inc: { retryCount: 1 },
+      }
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Reset gig to pending so it will be retried (used after verification clears) */
+async function resetGigToPending(
+  jobId: string,
+  index: number
+): Promise<void> {
+  try {
+    await GigProgress.findOneAndUpdate(
+      { jobId, index },
+      { $set: { status: "pending" } }
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function processGigList(
   job: IScrapeJob,
   jobId: string,
@@ -87,12 +162,28 @@ export async function processGigList(
   const totalSteps = Math.max(gigUrls.length, 1);
 
   for (let i = startIndex; i < gigUrls.length; i++) {
-    const current = await ScrapeJob.findById(jobId).select("status totalLeadsFound");
+    // Skip gigs that were already completed (safety net for mismatched startIndex)
+    const gigProg = await GigProgress.findOne(
+      { jobId, index: i },
+      { status: 1 }
+    ).lean();
+    if (gigProg?.status === "completed" || gigProg?.status === "skipped") {
+      await appendJobLog(
+        jobId,
+        `Skipped gig ${i + 1}/${gigUrls.length} (already ${gigProg.status})`
+      );
+      continue;
+    }
+
+    const current = await ScrapeJob.findById(jobId).select("status");
     if (current?.status === "stopped") return "stopped";
     if (state.totalLeads >= job.maxTotalLeads) break;
 
     const gigUrl = gigUrls[i];
     console.log(`[worker] Gig ${i + 1}/${gigUrls.length}: ${gigUrl}`);
+
+    // Mark gig as in-progress before touching the scraper
+    await markGigProcessing(jobId, i);
 
     await ScrapeJob.findByIdAndUpdate(jobId, {
       status: "extracting_reviews",
@@ -104,7 +195,10 @@ export async function processGigList(
       gigQueue: gigUrls,
       progressPercent: Math.round((i / totalSteps) * 100),
     });
-    await appendJobLog(jobId, `Opening real Fiverr gig ${i + 1}/${gigUrls.length}: ${gigUrl}`);
+    await appendJobLog(
+      jobId,
+      `Opening real Fiverr gig ${i + 1}/${gigUrls.length}: ${gigUrl}`
+    );
 
     try {
       await appendJobLog(jobId, `Waiting ${job.delaySeconds}s before navigation`);
@@ -154,7 +248,13 @@ export async function processGigList(
         );
 
         const { saved, country, reason } = await saveLeadIfQualified(
-          { jobId: job._id, userId: job.userId, niche, gig, review: reviewForSave },
+          {
+            jobId: job._id,
+            userId: job.userId,
+            niche,
+            gig,
+            review: reviewForSave,
+          },
           job.targetCountries
         );
 
@@ -164,7 +264,10 @@ export async function processGigList(
           const bucket = countLeadByCountry(country);
           if (bucket === "us") state.usLeads += 1;
           if (bucket === "canada") state.canadaLeads += 1;
-          await appendJobLog(jobId, `Saved lead: ${review.reviewerName} (${country})`);
+          await appendJobLog(
+            jobId,
+            `Saved lead: ${review.reviewerName} (${country})`
+          );
         } else {
           skippedForGig += 1;
           await appendJobLog(
@@ -172,7 +275,26 @@ export async function processGigList(
             `Skipped review: ${review.reviewerName || "missing reviewer"} (${country || "missing country"}) reason=${reason}`
           );
         }
+
+        // Persist progress every 5 reviews for real-time visibility
+        if ((reviewIndex + 1) % 5 === 0) {
+          await ScrapeJob.findByIdAndUpdate(jobId, {
+            currentReviewPage: reviewIndex + 1,
+            totalReviewsParsed: state.reviewsChecked,
+            totalLeadsFound: state.totalLeads,
+            usLeadsFound: state.usLeads,
+            canadaLeadsFound: state.canadaLeads,
+          });
+        }
       }
+
+      // Atomically mark gig completed before updating the parent job counters
+      await markGigCompleted(
+        jobId,
+        i,
+        reviewsChecked ?? reviews.length,
+        savedForGig
+      );
 
       await ScrapeJob.findByIdAndUpdate(jobId, {
         gigsScanned: state.gigsScanned,
@@ -183,14 +305,17 @@ export async function processGigList(
         totalReviewsParsed: state.reviewsChecked,
         resumeIndex: i + 1,
       });
+
       console.log(`[worker] Leads saved count for gig: ${savedForGig}`);
       await appendJobLog(jobId, `Leads saved: ${savedForGig}`);
       await appendJobLog(
         jobId,
-        `Gig complete: saved=${savedForGig}, skipped=${skippedForGig}, totalLeads=${state.totalLeads}`
+        `Gig ${i + 1}/${gigUrls.length} complete: saved=${savedForGig}, skipped=${skippedForGig}, totalLeads=${state.totalLeads}`
       );
     } catch (err) {
       if (err instanceof ScraperVerificationRequiredError) {
+        // Reset gig so it retries after verification clears
+        await resetGigToPending(jobId, i);
         const result = await waitForFiverrVerification({
           jobId,
           gigUrl,
@@ -205,6 +330,7 @@ export async function processGigList(
       }
 
       if (err instanceof ScraperBlockedError) {
+        await resetGigToPending(jobId, i);
         const result = await waitForFiverrVerification({
           jobId,
           gigUrl,
@@ -219,6 +345,8 @@ export async function processGigList(
       }
 
       if (isBrowserClosedError(err)) {
+        // Reset gig to pending so next resume retries it from the top
+        await resetGigToPending(jobId, i);
         await ScrapeJob.findByIdAndUpdate(jobId, {
           status: "verification_required",
           verificationMessage: VERIFICATION_MESSAGE,
@@ -235,13 +363,14 @@ export async function processGigList(
 
       state.failedGigs += 1;
       const msg = err instanceof Error ? err.message : String(err);
+      await markGigFailed(jobId, i, msg);
       await ScrapeJob.findByIdAndUpdate(jobId, {
         failedGigs: state.failedGigs,
         $push: { errorLog: `${gigUrl}: ${msg}` },
       });
       await appendJobLog(
         jobId,
-        `${/selectors failed/i.test(msg) ? "selectors failed" : "Gig failed"}: ${gigUrl} | ${msg}`
+        `${/selectors failed/i.test(msg) ? "selectors failed" : "Gig failed"}: gig ${i + 1}/${gigUrls.length} | ${gigUrl} | ${msg}`
       );
     }
   }

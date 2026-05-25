@@ -1,6 +1,7 @@
 import "@/lib/load-env";
 import { isPythonScraperEngine } from "@/lib/scraper-engine";
 import fs from "fs/promises";
+import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { logActivity } from "@/lib/activityLog";
 import { appendJobLog } from "@/lib/jobLog";
@@ -9,6 +10,7 @@ import { discoverGigUrls } from "@/scraper/discovery";
 import { saveLeadIfQualified, countLeadByCountry } from "@/lib/leads";
 import { normalizeFiverrUrl } from "@/scraper/fiverr/urls";
 import ScrapeJob, { type IScrapeJob } from "@/models/ScrapeJob";
+import GigProgress from "@/models/GigProgress";
 import { createScraper, closeScraper } from "@/scraper/factory";
 import { pauseWithoutClosing } from "@/scraper/live/browser";
 import { processGigList, type GigProcessorState } from "./gigProcessor";
@@ -17,6 +19,9 @@ import {
   ScraperVerificationRequiredError,
 } from "@/scraper/types";
 import { VERIFICATION_MESSAGE } from "@/lib/extraction-modes";
+
+/** Gigs stuck in "processing" longer than this are reset to "pending" */
+const STUCK_GIG_MS = 30 * 60 * 1000;
 
 function initialState(job: {
   gigsScanned?: number;
@@ -60,7 +65,11 @@ async function finishJob(
   }
 }
 
-async function setVerificationRequired(jobId: string, message: string, extra?: Record<string, unknown>) {
+async function setVerificationRequired(
+  jobId: string,
+  message: string,
+  extra?: Record<string, unknown>
+) {
   await ScrapeJob.findByIdAndUpdate(jobId, {
     status: "verification_required",
     verificationMessage: VERIFICATION_MESSAGE,
@@ -70,9 +79,75 @@ async function setVerificationRequired(jobId: string, message: string, extra?: R
   await appendJobLog(jobId, `Verification required: ${message}`);
 }
 
+/**
+ * Ensure GigProgress records exist for all URLs.
+ * Uses upsert with $setOnInsert so existing records are never overwritten.
+ */
+async function ensureGigProgressRecords(
+  jobId: string,
+  gigUrls: string[]
+): Promise<void> {
+  if (gigUrls.length === 0) return;
+  const jobObjId = new Types.ObjectId(jobId);
+  for (const [index, url] of gigUrls.entries()) {
+    await GigProgress.updateOne(
+      { jobId: jobObjId, index },
+      {
+        $setOnInsert: {
+          jobId: jobObjId,
+          url,
+          index,
+          status: "pending" as const,
+          retryCount: 0,
+          reviewsParsed: 0,
+          leadsFound: 0,
+        },
+      },
+      { upsert: true }
+    );
+  }
+}
+
+/**
+ * Reset gigs that have been stuck in "processing" state for too long.
+ * Called on every job pickup to handle crashes that left gigs mid-flight.
+ */
+async function resetProcessingGigs(jobId: string): Promise<number> {
+  const threshold = new Date(Date.now() - STUCK_GIG_MS);
+  const result = await GigProgress.updateMany(
+    {
+      jobId,
+      status: "processing",
+      $or: [
+        { startedAt: { $lt: threshold } },
+        { startedAt: { $exists: false } },
+      ],
+    },
+    { $set: { status: "pending" } }
+  );
+  return result.modifiedCount;
+}
+
+/**
+ * Find the first gig index that still needs processing.
+ * Returns totalCount when all gigs are done (signals loop exit).
+ */
+async function findResumeIndex(
+  jobId: string,
+  totalCount: number
+): Promise<number> {
+  const first = await GigProgress.findOne(
+    { jobId, status: { $in: ["pending", "failed"] } },
+    { index: 1 }
+  ).sort({ index: 1 });
+  return first?.index ?? totalCount;
+}
+
 export async function processScrapeJob(jobId: string): Promise<void> {
   if (isPythonScraperEngine()) {
-    console.log(`[worker] Skip ${jobId} — Python scraper handles jobs (SCRAPER_ENGINE=python)`);
+    console.log(
+      `[worker] Skip ${jobId} — Python scraper handles jobs (SCRAPER_ENGINE=python)`
+    );
     return;
   }
 
@@ -93,7 +168,10 @@ export async function processScrapeJob(jobId: string): Promise<void> {
   let finalStatus = "running";
 
   try {
-    await appendJobLog(jobId, `Started | mode=${job.extractionMode} | niche="${niche}"`);
+    await appendJobLog(
+      jobId,
+      `Started | mode=${job.extractionMode} | niche="${niche}"`
+    );
     await appendJobLog(
       jobId,
       `Review image option=${job.reviewImageMode || "with_image"}`
@@ -102,10 +180,10 @@ export async function processScrapeJob(jobId: string): Promise<void> {
       jobId,
       `Targets=${job.targetCountries.join(", ")} | maxGigs=${job.maxGigs} | maxReviewsPerGig=${job.maxReviewsPerGig} | maxTotalLeads=${job.maxTotalLeads}`
     );
-    if ((job.resumeIndex || 0) > 0 || (job.gigQueue?.length || 0) > 0) {
-      await appendJobLog(jobId, "Session resumed. Scraping will continue from saved queue progress.");
-    }
-    await ScrapeJob.findByIdAndUpdate(jobId, { status: "running", verificationMessage: "" });
+    await ScrapeJob.findByIdAndUpdate(jobId, {
+      status: "running",
+      verificationMessage: "",
+    });
 
     if (job.extractionMode === "html_import") {
       await processHtmlImportJob(job, jobId, niche, state);
@@ -115,16 +193,19 @@ export async function processScrapeJob(jobId: string): Promise<void> {
     const scraper = createScraper();
 
     if (job.extractionMode === "manual_urls") {
-      const urls = (job.manualGigUrls?.length ? job.manualGigUrls : job.gigQueue) || [];
+      const urls =
+        (job.manualGigUrls?.length ? job.manualGigUrls : job.gigQueue) || [];
       const normalized = urls.flatMap((u) => {
         const normalizedUrl = normalizeFiverrUrl(u);
         return normalizedUrl ? [normalizedUrl] : [];
       });
       const skipped = urls.length - normalized.length;
 
-      await appendJobLog(jobId, `Manual URLs accepted: ${normalized.length} real Fiverr gigs`);
       if (skipped > 0) {
-        await appendJobLog(jobId, `Manual URLs skipped as invalid/non-gig: ${skipped}`);
+        await appendJobLog(
+          jobId,
+          `Manual URLs skipped as invalid/non-gig: ${skipped}`
+        );
       }
 
       if (normalized.length === 0) {
@@ -136,18 +217,52 @@ export async function processScrapeJob(jobId: string): Promise<void> {
         return;
       }
 
+      // Ensure GigProgress records exist, then find where to resume
+      await ensureGigProgressRecords(jobId, normalized);
+      const stuckCount = await resetProcessingGigs(jobId);
+      if (stuckCount > 0) {
+        await appendJobLog(
+          jobId,
+          `Reset ${stuckCount} stuck gig(s) to pending for retry`
+        );
+      }
+      const startIndex = await findResumeIndex(jobId, normalized.length);
+
       await ScrapeJob.findByIdAndUpdate(jobId, {
         status: "extracting_reviews",
         discoverySource: "manual",
         urlsDiscovered: normalized.length,
         gigQueue: normalized,
+        resumeIndex: startIndex,
+        totalGigs: normalized.length,
       });
+
+      if (startIndex >= normalized.length) {
+        await appendJobLog(
+          jobId,
+          `All ${normalized.length} gigs already completed — nothing to resume`
+        );
+        await finishJob(jobId, job.userId, "completed", state.totalLeads);
+        return;
+      }
+
+      if (startIndex > 0) {
+        await appendJobLog(
+          jobId,
+          `Resumed from gig ${startIndex + 1}/${normalized.length} (skipping ${startIndex} already-completed gigs)`
+        );
+      } else {
+        await appendJobLog(
+          jobId,
+          `Manual URLs accepted: ${normalized.length} real Fiverr gigs`
+        );
+      }
 
       const outcome = await processGigList(
         job,
         jobId,
         normalized,
-        job.resumeIndex || 0,
+        startIndex,
         scraper,
         niche,
         state
@@ -157,23 +272,85 @@ export async function processScrapeJob(jobId: string): Promise<void> {
       return;
     }
 
-    let gigUrls = job.gigQueue || [];
-    let startIndex = job.resumeIndex || 0;
+    // ── Live mode ──────────────────────────────────────────────────────────
+    // Check if URLs were already discovered for this job
+    const existingProgressCount = await GigProgress.countDocuments({ jobId });
 
-    if (gigUrls.length === 0) {
-      await ScrapeJob.findByIdAndUpdate(jobId, { status: "discovering_gigs" });
+    let gigUrls: string[];
+    let startIndex: number;
+
+    if (existingProgressCount > 0) {
+      // URLs already discovered — load them from GigProgress in original order
+      const stuckCount = await resetProcessingGigs(jobId);
+      if (stuckCount > 0) {
+        await appendJobLog(
+          jobId,
+          `Reset ${stuckCount} stuck gig(s) to pending for retry`
+        );
+      }
+
+      const progressRecords = await GigProgress.find({ jobId })
+        .sort({ index: 1 })
+        .lean();
+      gigUrls = progressRecords.map((r) => r.url);
+
+      const completedCount = progressRecords.filter(
+        (r) => r.status === "completed" || r.status === "skipped"
+      ).length;
+      const remainingCount = progressRecords.filter(
+        (r) => r.status === "pending" || r.status === "failed"
+      ).length;
+
+      startIndex = await findResumeIndex(jobId, gigUrls.length);
+
+      // Sync gigQueue and resumeIndex into ScrapeJob for UI display
+      await ScrapeJob.findByIdAndUpdate(jobId, {
+        gigQueue: gigUrls,
+        resumeIndex: startIndex,
+        urlsDiscovered: gigUrls.length,
+        totalGigs: gigUrls.length,
+      });
+
+      if (startIndex >= gigUrls.length) {
+        await appendJobLog(
+          jobId,
+          `All ${gigUrls.length} gigs already completed — nothing to resume`
+        );
+        await finishJob(jobId, job.userId, "completed", state.totalLeads);
+        return;
+      }
+
+      await appendJobLog(
+        jobId,
+        `Resuming job | totalGigs=${gigUrls.length} | completed=${completedCount} | remaining=${remainingCount}`
+      );
+      await appendJobLog(
+        jobId,
+        `Resumed from gig ${startIndex + 1}/${gigUrls.length} (skipping ${startIndex} already-completed gigs)`
+      );
+    } else {
+      // No GigProgress records — need to discover URLs first
+      await ScrapeJob.findByIdAndUpdate(jobId, {
+        status: "discovering_gigs",
+      });
       await appendJobLog(jobId, "Discovering real Fiverr gig URLs");
 
       try {
         const discovery = await discoverGigUrls(niche, job.maxGigs, []);
         gigUrls = discovery.gigUrls;
+
         await ScrapeJob.findByIdAndUpdate(jobId, {
           discoverySource: discovery.source,
           urlsDiscovered: gigUrls.length,
           gigQueue: gigUrls,
           resumeIndex: 0,
+          totalGigs: gigUrls.length,
         });
-        await appendJobLog(jobId, `Discovery source=${discovery.source} | URLs found=${gigUrls.length}`);
+
+        await appendJobLog(
+          jobId,
+          `Discovered ${gigUrls.length} URLs | source=${discovery.source}`
+        );
         for (const [idx, url] of gigUrls.slice(0, 10).entries()) {
           await appendJobLog(jobId, `Discovered URL ${idx + 1}: ${url}`);
         }
@@ -186,23 +363,35 @@ export async function processScrapeJob(jobId: string): Promise<void> {
           finalStatus = "verification_required";
           return;
         }
+
+        // Persist per-gig progress records immediately after discovery
+        await ensureGigProgressRecords(jobId, gigUrls);
+        startIndex = 0;
       } catch (err) {
-        if (err instanceof ScraperVerificationRequiredError || err instanceof ScraperBlockedError) {
+        if (
+          err instanceof ScraperVerificationRequiredError ||
+          err instanceof ScraperBlockedError
+        ) {
           const msg = err instanceof Error ? err.message : String(err);
           await pauseWithoutClosing(msg);
-          await setVerificationRequired(jobId, `Fiverr blocked discovery: ${msg}`);
+          await setVerificationRequired(
+            jobId,
+            `Fiverr blocked discovery: ${msg}`
+          );
           finalStatus = "verification_required";
           return;
         }
         throw err;
       }
-      startIndex = 0;
-    } else {
-      await appendJobLog(jobId, `Resuming queue | URLs=${gigUrls.length} | startIndex=${startIndex}`);
     }
 
-    await ScrapeJob.findByIdAndUpdate(jobId, { status: "extracting_reviews" });
-    await appendJobLog(jobId, "Extracting seller metadata and real reviews from gig pages");
+    await ScrapeJob.findByIdAndUpdate(jobId, {
+      status: "extracting_reviews",
+    });
+    await appendJobLog(
+      jobId,
+      "Extracting seller metadata and real reviews from gig pages"
+    );
 
     const outcome = await processGigList(
       job,
@@ -216,7 +405,10 @@ export async function processScrapeJob(jobId: string): Promise<void> {
     finalStatus = outcome;
     await finishJob(jobId, job.userId, outcome, state.totalLeads);
   } catch (err) {
-    if (err instanceof ScraperVerificationRequiredError || err instanceof ScraperBlockedError) {
+    if (
+      err instanceof ScraperVerificationRequiredError ||
+      err instanceof ScraperBlockedError
+    ) {
       const msg = err instanceof Error ? err.message : String(err);
       await pauseWithoutClosing(msg);
       await setVerificationRequired(jobId, `Fiverr page blocked: ${msg}`);
@@ -235,7 +427,10 @@ export async function processScrapeJob(jobId: string): Promise<void> {
       return;
     }
 
-    await ScrapeJob.findByIdAndUpdate(jobId, { status: "failed", $push: { errorLog: msg } });
+    await ScrapeJob.findByIdAndUpdate(jobId, {
+      status: "failed",
+      $push: { errorLog: msg },
+    });
     await appendJobLog(jobId, `Failed: ${msg}`);
     throw err;
   } finally {
@@ -276,9 +471,14 @@ async function processHtmlImportJob(
       await ScrapeJob.findByIdAndUpdate(jobId, {
         failedGigs: state.failedGigs,
         resumeIndex: i + 1,
-        $push: { errorLog: `${file.filename}: missing original Fiverr gig URL` },
+        $push: {
+          errorLog: `${file.filename}: missing original Fiverr gig URL`,
+        },
       });
-      await appendJobLog(jobId, `Skipped HTML without original Fiverr gig URL: ${file.filename}`);
+      await appendJobLog(
+        jobId,
+        `Skipped HTML without original Fiverr gig URL: ${file.filename}`
+      );
       continue;
     }
 
@@ -287,7 +487,10 @@ async function processHtmlImportJob(
       resumeIndex: i,
       progressPercent: Math.round((i / files.length) * 100),
     });
-    await appendJobLog(jobId, `Parsing HTML ${i + 1}/${files.length}: ${file.filename} | ${sourceUrl}`);
+    await appendJobLog(
+      jobId,
+      `Parsing HTML ${i + 1}/${files.length}: ${file.filename} | ${sourceUrl}`
+    );
 
     try {
       const { gig, reviews } = await parseGigFromHtml(html, sourceUrl);
@@ -309,7 +512,10 @@ async function processHtmlImportJob(
           const bucket = countLeadByCountry(country);
           if (bucket === "us") state.usLeads += 1;
           if (bucket === "canada") state.canadaLeads += 1;
-          await appendJobLog(jobId, `Lead saved: ${review.reviewerName} (${country})`);
+          await appendJobLog(
+            jobId,
+            `Lead saved: ${review.reviewerName} (${country})`
+          );
         } else {
           await appendJobLog(
             jobId,
@@ -333,7 +539,10 @@ async function processHtmlImportJob(
         failedGigs: state.failedGigs,
         $push: { errorLog: `${file.filename}: ${msg}` },
       });
-      await appendJobLog(jobId, `HTML parse failed: ${file.filename} | ${msg}`);
+      await appendJobLog(
+        jobId,
+        `HTML parse failed: ${file.filename} | ${msg}`
+      );
     }
   }
 

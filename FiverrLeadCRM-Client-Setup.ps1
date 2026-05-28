@@ -452,7 +452,7 @@ try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     $zipPath = Join-Path $tempRoot "source.zip"
     $extractDir = Join-Path $tempRoot "extract"
-    Invoke-WebRequest -Uri $RepoZipUrl -OutFile $zipPath
+    Invoke-WebRequest -Uri $RepoZipUrl -OutFile $zipPath -UseBasicParsing
     Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
     $source = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
     if (-not $source) {

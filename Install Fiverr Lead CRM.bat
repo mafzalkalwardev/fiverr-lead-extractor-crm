@@ -13,7 +13,7 @@ if not "%errorlevel%"=="0" (
 
 if not exist "FiverrLeadCRM-Client-Setup.ps1" (
   echo Downloading latest setup script...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/main/FiverrLeadCRM-Client-Setup.ps1' -OutFile '%~dp0FiverrLeadCRM-Client-Setup.ps1'"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/main/FiverrLeadCRM-Client-Setup.ps1' -OutFile '%~dp0FiverrLeadCRM-Client-Setup.ps1' -UseBasicParsing"
   if errorlevel 1 (
     echo [ERROR] Could not download FiverrLeadCRM-Client-Setup.ps1.
     pause

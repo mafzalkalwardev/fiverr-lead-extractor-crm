@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Download, Square, RefreshCw, ExternalLink } from "lucide-react";
+import { Download, Square, RefreshCw, ExternalLink, Pause, Play } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,27 @@ import { JobStatusBadge } from "@/components/job-status-badge";
 import { WorkerStatusBanner } from "@/components/worker-status-banner";
 import { useToast } from "@/components/providers/toast-provider";
 import { EXTRACTION_MODE_LABELS, REVIEW_IMAGE_MODE_LABELS } from "@/lib/extraction-modes";
+
+const ACTIVE_STATUSES = new Set([
+  "running",
+  "discovering_gigs",
+  "extracting_reviews",
+]);
+
+const TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "stopped",
+  "blocked",
+]);
+
+/** Polling interval in ms based on job status */
+function pollInterval(status: string | undefined): number {
+  if (!status) return 4000;
+  if (TERMINAL_STATUSES.has(status)) return 15_000;
+  if (status === "retry_required" || status === "paused") return 8_000;
+  return 4000;
+}
 
 export default function JobMonitorPage() {
   const params = useParams() as { id?: string } | null;
@@ -38,8 +59,7 @@ export default function JobMonitorPage() {
 
   useEffect(() => {
     if (!id) return;
-    const terminal = ["completed", "failed", "stopped", "blocked"];
-    const ms = job && terminal.includes(job.status) ? 12000 : 4000;
+    const ms = pollInterval(job?.status);
     const t = setInterval(fetchJob, ms);
     return () => clearInterval(t);
   }, [fetchJob, job?.status, id]);
@@ -49,13 +69,25 @@ export default function JobMonitorPage() {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [job?.activityLog?.length]);
 
-  const stopJob = async () => {
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const pauseJob = async () => {
     try {
-      await apiFetch(`/api/jobs/${id}/stop`, { method: "POST" });
-      toast({ title: "Job stopped" });
+      await apiFetch(`/api/jobs/${id}/pause`, { method: "POST" });
+      toast({ title: "Job paused", description: "Worker will stop after the current gig." });
       fetchJob();
     } catch (err) {
-      toast({ title: "Error", description: err instanceof Error ? err.message : "" });
+      toast({ title: "Pause failed", description: err instanceof Error ? err.message : "" });
+    }
+  };
+
+  const resumeJob = async () => {
+    try {
+      await apiFetch(`/api/jobs/${id}/resume`, { method: "POST" });
+      toast({ title: "Job resumed", description: "Continuing from last checkpoint." });
+      fetchJob();
+    } catch (err) {
+      toast({ title: "Resume failed", description: err instanceof Error ? err.message : "" });
     }
   };
 
@@ -69,6 +101,16 @@ export default function JobMonitorPage() {
       fetchJob();
     } catch (err) {
       toast({ title: "Retry failed", description: err instanceof Error ? err.message : "" });
+    }
+  };
+
+  const stopJob = async () => {
+    try {
+      await apiFetch(`/api/jobs/${id}/stop`, { method: "POST" });
+      toast({ title: "Job stopped" });
+      fetchJob();
+    } catch (err) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "" });
     }
   };
 
@@ -110,30 +152,36 @@ export default function JobMonitorPage() {
     );
   }
 
+  const status = job.status;
+  const isActive = ACTIVE_STATUSES.has(status);
+  const isVerification = status === "verification_required";
+  const isPaused = status === "paused";
+  const isRetryRequired = status === "retry_required";
+  const isFailed = status === "failed";
+  const isStopped = status === "stopped";
+
+  // ── Status hint ───────────────────────────────────────────────────────────
+
   const statusHint: Record<string, string> = {
-    pending: "Queued — Python scraper will pick this up",
-    running: "Python scraper active",
+    pending: "Queued — worker will pick this up shortly",
+    running: "Worker active",
     discovering_gigs: job.currentSearchPage
       ? `Searching Fiverr — search page ${job.currentSearchPage}${
           job.discoveryPageLimit ? ` of ${job.discoveryPageLimit}` : ""
         }`
       : "Searching Fiverr for gig URLs",
-    extracting_reviews: "Finishing all reviews on current gig, then next gig",
-    verification_required: "Complete Fiverr verification in the scraper browser; scraping resumes automatically",
+    extracting_reviews: "Extracting reviews — finishing current gig then moving to next",
+    verification_required:
+      "Complete Fiverr verification in the scraper browser; scraping resumes automatically",
+    paused: `Paused at gig ${job.resumeIndex ?? 0}/${job.gigQueue?.length ?? "?"} — click Resume to continue`,
+    retry_required: `Network error at gig ${job.resumeIndex ?? 0}/${job.gigQueue?.length ?? "?"} — click Retry to continue`,
     blocked: "Blocked by Fiverr",
     failed: "Failed — see errors below",
     completed: "Completed successfully",
-    stopped: "Stopped by user",
+    stopped: "Stopped — click Continue to resume from the saved checkpoint",
   };
 
   const errors = job.errors || job.jobErrors || [];
-  const isVerification = job.status === "verification_required";
-  const browserClosedError = errors.some((e) =>
-    /browser.*closed|Target page, context or browser/i.test(e)
-  );
-  const canRetry =
-    isVerification ||
-    (job.status === "failed" && browserClosedError);
 
   return (
     <DashboardLayout>
@@ -145,25 +193,91 @@ export default function JobMonitorPage() {
             {job.reviewImageMode ? ` · ${REVIEW_IMAGE_MODE_LABELS[job.reviewImageMode]}` : ""}
           </p>
           <p className="text-sm text-muted-foreground/90">
-            {statusHint[job.status] || job.status}
+            {statusHint[status] || status}
           </p>
         </div>
+
+        {/* ── Control buttons — vary by status ── */}
         <div className="flex flex-wrap gap-2 items-center">
-          <JobStatusBadge status={job.status} />
+          <JobStatusBadge status={status} />
+
+          {/* Export — always available */}
           <Button variant="outline" size="sm" onClick={exportLeads} className="gap-1">
             <Download className="h-4 w-4" /> Export
           </Button>
-          {canRetry && (
+
+          {/* Active → Pause + Stop */}
+          {isActive && (
+            <>
+              <Button variant="outline" size="sm" onClick={pauseJob} className="gap-1">
+                <Pause className="h-4 w-4" /> Pause
+              </Button>
+              <Button variant="destructive" size="sm" onClick={stopJob} className="gap-1">
+                <Square className="h-4 w-4" /> Stop
+              </Button>
+            </>
+          )}
+
+          {/* Paused → Resume + Stop */}
+          {isPaused && (
+            <>
+              <Button size="sm" onClick={resumeJob} className="gap-1">
+                <Play className="h-4 w-4" /> Resume
+              </Button>
+              <Button variant="destructive" size="sm" onClick={stopJob} className="gap-1">
+                <Square className="h-4 w-4" /> Stop
+              </Button>
+            </>
+          )}
+
+          {/* Retry required (network timeout) → Retry + Stop */}
+          {isRetryRequired && (
+            <>
+              <Button size="sm" onClick={retryJob} className="gap-1">
+                <RefreshCw className="h-4 w-4" /> Retry
+              </Button>
+              <Button variant="destructive" size="sm" onClick={stopJob} className="gap-1">
+                <Square className="h-4 w-4" /> Stop
+              </Button>
+            </>
+          )}
+
+          {/* Verification required → Open Gig + Continue/Retry + Stop */}
+          {isVerification && (
             <>
               <Button variant="outline" size="sm" onClick={openBrowser} className="gap-1">
                 <ExternalLink className="h-4 w-4" /> Open Gig Link
               </Button>
               <Button size="sm" onClick={retryJob} className="gap-1">
-                <RefreshCw className="h-4 w-4" /> Retry
+                <RefreshCw className="h-4 w-4" /> Continue
+              </Button>
+              <Button variant="destructive" size="sm" onClick={stopJob} className="gap-1">
+                <Square className="h-4 w-4" /> Stop
               </Button>
             </>
           )}
-          {["running", "pending", "verification_required"].includes(job.status) && (
+
+          {/* Failed → Retry + Stop */}
+          {isFailed && (
+            <>
+              <Button size="sm" onClick={retryJob} className="gap-1">
+                <RefreshCw className="h-4 w-4" /> Retry Job
+              </Button>
+              <Button variant="destructive" size="sm" onClick={stopJob} className="gap-1">
+                <Square className="h-4 w-4" /> Stop
+              </Button>
+            </>
+          )}
+
+          {/* Stopped → Continue (resumes from saved GigProgress checkpoint) */}
+          {isStopped && (
+            <Button size="sm" onClick={retryJob} className="gap-1">
+              <Play className="h-4 w-4" /> Continue
+            </Button>
+          )}
+
+          {/* Pending → Stop */}
+          {status === "pending" && (
             <Button variant="destructive" size="sm" onClick={stopJob} className="gap-1">
               <Square className="h-4 w-4" /> Stop
             </Button>
@@ -173,7 +287,8 @@ export default function JobMonitorPage() {
 
       <WorkerStatusBanner />
 
-      {canRetry && (
+      {/* Verification banner */}
+      {isVerification && (
         <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/15 px-4 py-4 text-sm">
           <p className="font-medium text-amber-200">
             {job.verificationMessage ||
@@ -185,7 +300,31 @@ export default function JobMonitorPage() {
             <li>Leave that window open; the worker will resume from the saved gig automatically.</li>
           </ol>
           <p className="text-xs text-muted-foreground mt-2">
-            Progress saved - gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.
+            Progress saved — gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.
+          </p>
+        </div>
+      )}
+
+      {/* Retry required banner (network timeout) */}
+      {isRetryRequired && (
+        <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/15 px-4 py-4 text-sm">
+          <p className="font-medium text-amber-200">
+            Network timeout — the scraper lost connectivity while processing gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            All progress is saved. Click <strong>Retry</strong> to reconnect and continue from the same gig — no leads will be duplicated.
+          </p>
+        </div>
+      )}
+
+      {/* Paused banner */}
+      {isPaused && (
+        <div className="mb-4 rounded-md border border-border bg-muted/20 px-4 py-3 text-sm">
+          <p className="font-medium">
+            Job paused at gig {job.resumeIndex ?? 0} of {job.gigQueue?.length || "?"}.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Click <strong>Resume</strong> to continue from where it left off.
           </p>
         </div>
       )}
@@ -193,9 +332,9 @@ export default function JobMonitorPage() {
       <Card className="mb-6 border-border/80 shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold">Activity log</CardTitle>
-          {(job.discoverySource || job.status === "discovering_gigs") && (
+          {(job.discoverySource || status === "discovering_gigs") && (
             <p className="text-sm text-muted-foreground">
-              {job.status === "discovering_gigs" && job.currentSearchPage ? (
+              {status === "discovering_gigs" && job.currentSearchPage ? (
                 <>
                   Search page{" "}
                   <span className="text-primary font-medium">{job.currentSearchPage}</span>
@@ -206,7 +345,7 @@ export default function JobMonitorPage() {
               ) : null}
               {job.discoverySource && (
                 <>
-                  {job.status === "discovering_gigs" && job.currentSearchPage ? " · " : null}
+                  {status === "discovering_gigs" && job.currentSearchPage ? " · " : null}
                   Discovery:{" "}
                   <span className="text-primary font-medium">{job.discoverySource}</span>
                 </>
@@ -246,7 +385,7 @@ export default function JobMonitorPage() {
           <CardContent className="space-y-4">
             <Progress value={job.progressPercent} />
             <div className="grid grid-cols-2 gap-3 text-sm">
-              {job.status === "discovering_gigs" && (job.currentSearchPage ?? 0) > 0 && (
+              {status === "discovering_gigs" && (job.currentSearchPage ?? 0) > 0 && (
                 <div className="col-span-2">
                   <p className="text-muted-foreground">Search page</p>
                   <p className="text-xl font-bold text-primary">
@@ -261,7 +400,9 @@ export default function JobMonitorPage() {
                 <p className="text-muted-foreground">Current gig</p>
                 <p className="text-xl font-bold">
                   {job.currentGigNumber || job.resumeIndex || 0}
-                  {job.totalGigs || job.gigQueue?.length ? ` / ${job.totalGigs || job.gigQueue?.length}` : ""}
+                  {job.totalGigs || job.gigQueue?.length
+                    ? ` / ${job.totalGigs || job.gigQueue?.length}`
+                    : ""}
                 </p>
               </div>
               <div>

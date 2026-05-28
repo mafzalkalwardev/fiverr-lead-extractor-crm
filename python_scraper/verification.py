@@ -235,7 +235,7 @@ async def wait_until_verification_clears(
     last_resume_navigation = -999.0
     last_wait_log = 0.0
     last_heartbeat = 0.0
-    last_auto_attempt = -AUTO_RETRY_INTERVAL_SEC
+    last_auto_attempt = -5.0  # first attempt fires after ~5s (not immediately)
     auto_attempts = 0
     max_auto_attempts = max(0, config.AUTO_VERIFICATION_MAX_ATTEMPTS)
     detected_url = ""

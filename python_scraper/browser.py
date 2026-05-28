@@ -213,6 +213,33 @@ async def close_extra_pages(keep: Page) -> Page:
     return await _normalize_single_tab(keep.context, keep)
 
 
+_VERIF_KEYWORDS = (
+    "captcha", "perimeterx", "px-captcha", "human-touch", "humantouch",
+    "human_touch", "verification", "challenge", "press-hold", "press_hold",
+)
+
+
+async def _auto_close_new_tab(new_page: Page) -> None:
+    """
+    Automatically close spurious new tabs that Fiverr opens via target=_blank.
+    Verification/captcha tabs are kept open so the verification watcher can
+    detect and press them; everything else is closed immediately.
+    """
+    await asyncio.sleep(0.5)
+    if new_page.is_closed():
+        return
+    url = (new_page.url or "").lower()
+    if any(k in url for k in _VERIF_KEYWORDS):
+        return  # keep captcha/challenge tabs for the verification watcher
+    try:
+        title = (await new_page.title()).lower()
+        if any(k in title for k in _VERIF_KEYWORDS):
+            return
+    except Exception:
+        pass
+    await _safe_close_page(new_page)
+
+
 async def launch_browser() -> BrowserContext:
     """Launch scraper Chromium once (bundled Playwright only)."""
     global _context, _playwright
@@ -244,6 +271,7 @@ async def launch_browser() -> BrowserContext:
                     **_launch_kwargs(),
                 )
                 _context.on("close", lambda: _set_context_none())
+                _context.on("page", lambda p: asyncio.create_task(_auto_close_new_tab(p)))
                 await _context.add_init_script("""
                     try {
                         // Hide automation signals

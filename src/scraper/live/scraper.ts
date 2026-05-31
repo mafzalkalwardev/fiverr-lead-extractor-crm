@@ -14,22 +14,69 @@ import { extractReviews, extractReviewsWithStats } from "./reviews";
 import { saveFailedGigArtifacts } from "./debug";
 import { ScraperBlockedError, ScraperVerificationRequiredError } from "../types";
 
-const MAX_RETRIES = 2;
+/** Errors that are NOT worth retrying — throw immediately */
+function isTerminalError(err: unknown): boolean {
+  return (
+    err instanceof ScraperBlockedError ||
+    err instanceof ScraperVerificationRequiredError
+  );
+}
 
+/**
+ * Detect network / connectivity timeouts.
+ * These get more retries and longer waits than selector failures.
+ */
+export function isNetworkTimeoutError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /timeout \d+ms exceeded|navigation timeout|net::err_|etimedout|econnrefused|econnreset|socket hang up|network change|internet disconnected|err_connection/i.test(
+    msg
+  );
+}
+
+const NETWORK_RETRIES = 3;
+const NETWORK_WAIT_MS = 10_000;
+const SELECTOR_RETRIES = 2;
+const SELECTOR_WAIT_MS = 2_000;
+
+/**
+ * Retry wrapper.
+ * Network timeouts: 3 retries × 10 s
+ * Other failures:   2 retries × 2 s / 4 s (existing behaviour)
+ * Blocked/verification: throw immediately (no retry)
+ */
 async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+
+  // First attempt
+  try {
+    return await fn();
+  } catch (err) {
+    if (isTerminalError(err)) throw err;
+    lastErr = err;
+  }
+
+  const maxRetries = isNetworkTimeoutError(lastErr)
+    ? NETWORK_RETRIES
+    : SELECTOR_RETRIES;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const waitMs = isNetworkTimeoutError(lastErr)
+      ? NETWORK_WAIT_MS
+      : SELECTOR_WAIT_MS * attempt;
+
+    console.warn(
+      `[live] ${label} retry attempt ${attempt}/${maxRetries} (${isNetworkTimeoutError(lastErr) ? "network" : "selector"}) — waiting ${waitMs / 1000}s`
+    );
+    await sleep(waitMs);
+
     try {
       return await fn();
     } catch (err) {
+      if (isTerminalError(err)) throw err;
       lastErr = err;
-      if (err instanceof ScraperBlockedError || err instanceof ScraperVerificationRequiredError) {
-        throw err;
-      }
-      console.warn(`[live] ${label} attempt ${attempt + 1} failed:`, err);
-      if (attempt < MAX_RETRIES) await sleep(2000 * (attempt + 1));
     }
   }
+
   throw lastErr;
 }
 
@@ -65,15 +112,19 @@ export class LiveFiverrScraper implements ScraperAdapter {
           reviewsChecked: reviewResult.reviewsChecked,
         };
       } catch (err) {
-        if (err instanceof ScraperBlockedError || err instanceof ScraperVerificationRequiredError) {
-          throw err;
-        }
+        if (isTerminalError(err)) throw err;
 
         const msg = err instanceof Error ? err.message : String(err);
         const artifacts = await saveFailedGigArtifacts(page).catch(() => null);
         const artifactMessage = artifacts
           ? ` screenshot=${artifacts.screenshotPath} html=${artifacts.htmlPath}`
           : "";
+
+        if (isNetworkTimeoutError(err)) {
+          console.warn(`[live] network timeout for ${gigUrl}: ${msg}`);
+          throw err; // re-throw so withRetry's network path picks it up
+        }
+
         console.warn(`[live] selectors failed for ${gigUrl}: ${msg}${artifactMessage}`);
         throw new Error(`selectors failed: ${msg}${artifactMessage}`);
       }

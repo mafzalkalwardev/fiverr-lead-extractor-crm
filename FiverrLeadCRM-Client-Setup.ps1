@@ -292,8 +292,8 @@ function Copy-AppSource([string]$SourceDir, [string]$TargetDir) {
         "test-results"
     )
 
-    $args = @($SourceDir, $TargetDir, "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/XF", ".env", "/XD") + $excludedDirs
-    robocopy @args | Out-Null
+    $robocopyArgs = @($SourceDir, $TargetDir, "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/XF", ".env", "/XD") + $excludedDirs
+    robocopy @robocopyArgs | Out-Null
     if ($LASTEXITCODE -gt 7) {
         throw "Copying app source failed with robocopy exit code $LASTEXITCODE."
     }
@@ -428,11 +428,25 @@ function Ensure-ShortcutAndStartup {
 
     if (Test-Path $startBat) {
         $wsh = New-Object -ComObject WScript.Shell
+        $electronExe = Join-Path $InstallDir "dist\Fiverr Lead Extractor.exe"
+        $iconLocation = if (Test-Path $electronExe) { "$electronExe,0" } else { "" }
+
         $shortcut = $wsh.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $startBat
         $shortcut.WorkingDirectory = $InstallDir
         $shortcut.Description = "Start Fiverr Lead Extractor CRM"
+        if ($iconLocation) { $shortcut.IconLocation = $iconLocation }
         $shortcut.Save()
+
+        $startMenuPrograms = [Environment]::GetFolderPath("Programs")
+        $startMenuShortcut = Join-Path $startMenuPrograms "Fiverr Lead CRM.lnk"
+        $lnk = $wsh.CreateShortcut($startMenuShortcut)
+        $lnk.TargetPath = $startBat
+        $lnk.WorkingDirectory = $InstallDir
+        $lnk.Description = "Start Fiverr Lead Extractor CRM"
+        if ($iconLocation) { $lnk.IconLocation = $iconLocation }
+        $lnk.Save()
+        Write-Host "Start Menu shortcut created." -ForegroundColor Green
 
         try {
             $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$startBat`"" -WorkingDirectory $InstallDir

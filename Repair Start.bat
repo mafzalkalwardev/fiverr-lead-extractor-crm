@@ -5,6 +5,12 @@ cd /d "%~dp0"
 
 if exist "%ProgramFiles%\nodejs\" set "PATH=%ProgramFiles%\nodejs\;%PATH%"
 
+if not exist "tools\mongodb\bin\mongod.exe" (
+  if exist "%USERPROFILE%\Fiverr Lead Extractor CRM\tools\mongodb\bin\mongod.exe" (
+    set "FIVERR_MONGOD_EXE=%USERPROFILE%\Fiverr Lead Extractor CRM\tools\mongodb\bin\mongod.exe"
+  )
+)
+
 echo.
 echo  REPAIR MODE
 echo  - Free port 3000

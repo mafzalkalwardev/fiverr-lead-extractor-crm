@@ -16,6 +16,7 @@ import {
   pauseWithoutClosing,
 } from "@/scraper/live/browser";
 import { waitForVerificationToClear } from "@/scraper/live/verification";
+import { isNetworkTimeoutError } from "@/scraper/live/scraper";
 
 export interface GigProcessorState {
   gigsScanned: number;
@@ -25,6 +26,13 @@ export interface GigProcessorState {
   totalLeads: number;
   failedGigs: number;
 }
+
+export type GigListOutcome =
+  | "completed"
+  | "verification_required"
+  | "stopped"
+  | "paused"
+  | "retry_required";
 
 async function bringWorkerBrowserToFront(): Promise<void> {
   try {
@@ -80,7 +88,6 @@ async function waitForFiverrVerification(params: {
   return "cleared";
 }
 
-/** Mark a gig as currently being processed */
 async function markGigProcessing(jobId: string, index: number): Promise<void> {
   try {
     await GigProgress.findOneAndUpdate(
@@ -88,11 +95,10 @@ async function markGigProcessing(jobId: string, index: number): Promise<void> {
       { $set: { status: "processing", startedAt: new Date() } }
     );
   } catch {
-    /* best-effort — job still proceeds without per-gig tracking */
+    /* best-effort */
   }
 }
 
-/** Mark a gig as successfully completed */
 async function markGigCompleted(
   jobId: string,
   index: number,
@@ -116,7 +122,6 @@ async function markGigCompleted(
   }
 }
 
-/** Mark a gig as failed and increment its retry counter */
 async function markGigFailed(
   jobId: string,
   index: number,
@@ -135,11 +140,7 @@ async function markGigFailed(
   }
 }
 
-/** Reset gig to pending so it will be retried (used after verification clears) */
-async function resetGigToPending(
-  jobId: string,
-  index: number
-): Promise<void> {
+async function resetGigToPending(jobId: string, index: number): Promise<void> {
   try {
     await GigProgress.findOneAndUpdate(
       { jobId, index },
@@ -158,11 +159,11 @@ export async function processGigList(
   scraper: ScraperAdapter,
   niche: string,
   state: GigProcessorState
-): Promise<"completed" | "verification_required" | "stopped"> {
+): Promise<GigListOutcome> {
   const totalSteps = Math.max(gigUrls.length, 1);
 
   for (let i = startIndex; i < gigUrls.length; i++) {
-    // Skip gigs that were already completed (safety net for mismatched startIndex)
+    // Skip gigs already completed (safety net)
     const gigProg = await GigProgress.findOne(
       { jobId, index: i },
       { status: 1 }
@@ -175,14 +176,22 @@ export async function processGigList(
       continue;
     }
 
-    const current = await ScrapeJob.findById(jobId).select("status");
+    // Check for control signals before each gig
+    const current = await ScrapeJob.findById(jobId).select("status").lean();
     if (current?.status === "stopped") return "stopped";
+    if (current?.status === "paused") {
+      await appendJobLog(
+        jobId,
+        `Job paused at gig ${i + 1}/${gigUrls.length}. Will resume from here.`
+      );
+      return "paused";
+    }
+
     if (state.totalLeads >= job.maxTotalLeads) break;
 
     const gigUrl = gigUrls[i];
     console.log(`[worker] Gig ${i + 1}/${gigUrls.length}: ${gigUrl}`);
 
-    // Mark gig as in-progress before touching the scraper
     await markGigProcessing(jobId, i);
 
     await ScrapeJob.findByIdAndUpdate(jobId, {
@@ -264,10 +273,7 @@ export async function processGigList(
           const bucket = countLeadByCountry(country);
           if (bucket === "us") state.usLeads += 1;
           if (bucket === "canada") state.canadaLeads += 1;
-          await appendJobLog(
-            jobId,
-            `Saved lead: ${review.reviewerName} (${country})`
-          );
+          await appendJobLog(jobId, `Saved lead: ${review.reviewerName} (${country})`);
         } else {
           skippedForGig += 1;
           await appendJobLog(
@@ -288,13 +294,7 @@ export async function processGigList(
         }
       }
 
-      // Atomically mark gig completed before updating the parent job counters
-      await markGigCompleted(
-        jobId,
-        i,
-        reviewsChecked ?? reviews.length,
-        savedForGig
-      );
+      await markGigCompleted(jobId, i, reviewsChecked ?? reviews.length, savedForGig);
 
       await ScrapeJob.findByIdAndUpdate(jobId, {
         gigsScanned: state.gigsScanned,
@@ -314,7 +314,6 @@ export async function processGigList(
       );
     } catch (err) {
       if (err instanceof ScraperVerificationRequiredError) {
-        // Reset gig so it retries after verification clears
         await resetGigToPending(jobId, i);
         const result = await waitForFiverrVerification({
           jobId,
@@ -345,7 +344,6 @@ export async function processGigList(
       }
 
       if (isBrowserClosedError(err)) {
-        // Reset gig to pending so next resume retries it from the top
         await resetGigToPending(jobId, i);
         await ScrapeJob.findByIdAndUpdate(jobId, {
           status: "verification_required",
@@ -361,8 +359,27 @@ export async function processGigList(
         return "verification_required";
       }
 
-      state.failedGigs += 1;
       const msg = err instanceof Error ? err.message : String(err);
+
+      // Network timeout: set retry_required so user can retry without losing progress
+      if (isNetworkTimeoutError(err)) {
+        await resetGigToPending(jobId, i);
+        await ScrapeJob.findByIdAndUpdate(jobId, {
+          status: "retry_required",
+          lastError: msg.slice(0, 500),
+          currentGigLink: gigUrl,
+          gigQueue: gigUrls,
+          resumeIndex: i,
+          $push: { errorLog: `Network timeout at gig ${i + 1}/${gigUrls.length}: ${msg}` },
+        });
+        await appendJobLog(
+          jobId,
+          `Network timeout at gig ${i + 1}/${gigUrls.length}: ${msg}. Click Retry to continue from this gig.`
+        );
+        return "retry_required";
+      }
+
+      state.failedGigs += 1;
       await markGigFailed(jobId, i, msg);
       await ScrapeJob.findByIdAndUpdate(jobId, {
         failedGigs: state.failedGigs,

@@ -18,7 +18,7 @@ function AuthLoading() {
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const [ready, setReady] = useState(false);
 
   useEffect(() => {

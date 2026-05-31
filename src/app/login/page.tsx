@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/providers/toast-provider";
-import { BrandLogo, BrandFooter } from "@/components/branding";
+import { BrandFooter } from "@/components/branding";
 import { APP_NAME } from "@/lib/constants";
 
 export default function LoginPage() {
@@ -51,11 +51,22 @@ export default function LoginPage() {
             "radial-gradient(ellipse 80% 50% at 50% -20%, hsl(142 76% 45% / 0.15), transparent), radial-gradient(ellipse 60% 40% at 100% 100%, hsl(217 33% 25% / 0.4), transparent)",
         }}
       />
+      <div className="mb-10 flex flex-col items-center gap-4 text-center">
+        <img
+          src="/ftsolutionslogo.jpg"
+          alt="FT Solutions logo"
+          width={120}
+          height={120}
+          className="rounded-3xl border border-border/50 bg-card/80 p-3 shadow-xl"
+        />
+        <div>
+          <p className="text-3xl font-bold tracking-tight text-foreground">FT Solutions</p>
+          <p className="text-sm text-muted-foreground">Lead Extractor CRM</p>
+          <p className="mt-2 text-sm text-primary">Contact: +923472543818</p>
+        </div>
+      </div>
       <Card className="relative w-full max-w-md border-border/80 bg-card/95 shadow-2xl backdrop-blur-sm">
         <CardHeader className="space-y-6 pb-2 text-center">
-          <div className="flex justify-center">
-            <BrandLogo />
-          </div>
           <div className="space-y-1">
             <CardDescription className="text-base text-muted-foreground">
               Sign in to {APP_NAME}

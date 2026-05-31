@@ -147,26 +147,40 @@ function Start-PortableMongo([int]$Port) {
 try {
     New-Item -ItemType Directory -Path $AppDataRoot -Force | Out-Null
 
-    $existing = Get-PortableMongoProcess
-    if ($existing) {
-        $existingPort = Get-PortFromCommandLine -CommandLine $existing.CommandLine
-        if (Test-PortOpen -Port $existingPort) {
-            Set-SelectedMongoUri -Port $existingPort
+    # ── Step 1: If MongoDB is already accepting connections on any candidate port,
+    #    reuse it immediately. This handles admin-elevated processes whose CommandLine
+    #    is hidden from WMI, and avoids starting a second instance that would fail
+    #    with a data-directory lock conflict.
+    foreach ($candidatePort in @($PrimaryPort, $FallbackPort)) {
+        if (Test-PortOpen -Port $candidatePort) {
+            Write-Info "MongoDB already accepting connections on port $candidatePort"
+            Set-SelectedMongoUri -Port $candidatePort
             Write-Info "MongoDB ready"
             exit 0
         }
     }
 
+    # ── Step 2: Nothing is responding. Choose a start port.
+    #    If the primary port is bound but not yet accepting connections (very rare
+    #    race), fall back to the secondary port.
     $selectedPort = $PrimaryPort
-    if (Test-PortOpen -Port $PrimaryPort) {
-        Write-Info "port $PrimaryPort is busy; using $FallbackPort"
-        $selectedPort = $FallbackPort
+
+    # ── Step 3: Remove a stale lock file left by a previously crashed mongod.
+    #    Without this, the fresh mongod process will exit immediately because it
+    #    cannot acquire the WiredTiger data-directory lock.
+    $lockFile = Join-Path $DbPath "mongod.lock"
+    if (Test-Path $lockFile) {
+        $lockPid = (Get-Content $lockFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
+        $lockHolder = if ($lockPid -and $lockPid -ne '0') {
+            Get-Process -Id ([int]$lockPid) -ErrorAction SilentlyContinue
+        } else { $null }
+        if (-not $lockHolder) {
+            Write-Info "Removing stale lock file (pid $lockPid is not running)..."
+            Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+        }
     }
 
-    if (Test-PortOpen -Port $selectedPort) {
-        throw "Port $selectedPort is already busy."
-    }
-
+    # ── Step 4: Start MongoDB on the selected port.
     $proc = Start-PortableMongo -Port $selectedPort
     Wait-ForMongo -Port $selectedPort -Process $proc
     Set-SelectedMongoUri -Port $selectedPort

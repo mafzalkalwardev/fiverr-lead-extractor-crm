@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { AppToastProvider } from "@/components/providers/toast-provider";
 import { APP_NAME, COMPANY_NAME } from "@/lib/constants";
+import { WhatsAppButton } from "@/components/whatsapp-button";
 
 const font = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className={font.className} suppressHydrationWarning>
         <AppToastProvider>{children}</AppToastProvider>
+        <WhatsAppButton />
       </body>
     </html>
   );

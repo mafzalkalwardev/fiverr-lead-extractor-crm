@@ -148,11 +148,31 @@ async def click_load_more(page: Page, max_clicks: int = 50) -> int:
     return clicks
 
 
+async def _close_open_dialogs(page: Page) -> None:
+    """Dismiss any open gallery/portfolio overlay that could interfere with review pagination."""
+    try:
+        for sel in (
+            '[role="dialog"] button[aria-label*="close" i]',
+            '[role="dialog"] button[aria-label*="dismiss" i]',
+            '[class*="overlay" i] button[aria-label*="close" i]',
+        ):
+            btn = page.locator(sel).first
+            if await btn.count() and await btn.is_visible():
+                await btn.click(timeout=2000)
+                await asyncio.sleep(0.3)
+                return
+        if await page.locator('[role="dialog"]:visible').count():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
+    except Exception:
+        pass
+
+
 async def click_next_review_page(page: Page, current_page: int) -> bool:
     """Click the next reviews pagination control inside the review section."""
     scope = page.locator(REVIEW_SECTION).first
     if not await scope.count():
-        scope = page.locator("body")
+        return False  # No review section found — never fall back to body-level pagination
 
     candidates = [
         scope.get_by_role("button", name=re.compile(r"^(next|next page|>)$", re.I)),
@@ -739,6 +759,9 @@ async def extract_reviews(
     review_page = 1
     total_load_clicks = 0
     seen_page_signatures: set[str] = set()
+    consecutive_empty_pages = 0
+
+    await _close_open_dialogs(page)
 
     while True:
         if review_page > max(1, config.REVIEW_MAX_PAGES):
@@ -779,6 +802,18 @@ async def extract_reviews(
             break
         if signature:
             seen_page_signatures.add(signature)
+
+        if len(candidates) == 0:
+            consecutive_empty_pages += 1
+            if consecutive_empty_pages >= 2:
+                append_activity(
+                    job_id,
+                    f"Review page {review_page}: no review blocks on {consecutive_empty_pages} "
+                    "consecutive pages — stopping pagination",
+                )
+                break
+        else:
+            consecutive_empty_pages = 0
 
         kept_before_page = len(parsed)
 
@@ -863,6 +898,7 @@ async def extract_reviews(
 
         if not unlimited and len(parsed) >= max_reviews:
             break
+        await _close_open_dialogs(page)
         if not await click_next_review_page(page, review_page):
             break
         review_page += 1

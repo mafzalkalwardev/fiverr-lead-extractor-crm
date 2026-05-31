@@ -7,6 +7,8 @@ export type JobStatus =
   | "discovering_gigs"
   | "extracting_reviews"
   | "verification_required"
+  | "paused"
+  | "retry_required"
   | "blocked"
   | "completed"
   | "failed"
@@ -56,6 +58,8 @@ export interface IScrapeJob extends Document {
   skippedExistingGigs: number;
   keyword?: string;
   category?: string;
+  retryCount: number;
+  lastError: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -87,6 +91,8 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
         "discovering_gigs",
         "extracting_reviews",
         "verification_required",
+        "paused",
+        "retry_required",
         "blocked",
         "completed",
         "failed",
@@ -132,6 +138,8 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     skippedExistingGigs: { type: Number, default: 0 },
     keyword: { type: String, required: false },
     category: { type: String, required: false },
+    retryCount: { type: Number, default: 0 },
+    lastError: { type: String, default: "" },
   },
   { timestamps: true }
 );

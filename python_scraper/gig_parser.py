@@ -43,7 +43,12 @@ async def open_gig_page(page: Page, url: str, job_id: str) -> str:
     if not target:
         raise ValueError(f"Invalid Fiverr gig URL: {url}")
     print(f"[gig] Opening: {target}")
-    await page.goto(target, wait_until="domcontentloaded", timeout=120_000)
+    try:
+        await page.goto(target, wait_until="domcontentloaded", timeout=60_000)
+    except Exception as nav_err:
+        if "timeout" in str(nav_err).lower():
+            raise TimeoutError(f"Gig page did not load within 60s (network timeout): {target}") from nav_err
+        raise
     await asyncio.sleep(config.GIG_PAGE_WAIT_SEC)
     await assert_page_accessible(page, job_id, target)
     try:

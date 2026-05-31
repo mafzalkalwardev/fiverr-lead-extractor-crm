@@ -13,10 +13,14 @@
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
 *.pem
+.claude/
+.run/
+.sixth/
 
 # debug
 npm-debug.log*
@@ -40,9 +44,12 @@ next-env.d.ts
 /browser-profile-py/
 /browser-profile-py-fresh/
 debug-fiverr.png
+debug-google.html
 /data/uploads/
 __pycache__/
 *.pyc
 
 # local Redis 5 portable (optional)
 /tools/redis5/
+/tools/mongodb/bin/
+/tools/mongodb/data/

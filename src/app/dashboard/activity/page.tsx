@@ -6,6 +6,11 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import type { ActivityLogEntry } from "@/types";
 
+function getLibraryFromDetails(details: string) {
+  const parts = details.split("·").map((part) => part.trim());
+  return parts.length === 3 ? parts[2] : "";
+}
+
 export default function UserActivityPage() {
   const [logs, setLogs] = useState<ActivityLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +52,7 @@ export default function UserActivityPage() {
                     <th className="p-3 text-left">Time</th>
                     <th className="p-3 text-left">Action</th>
                     <th className="p-3 text-left">Details</th>
+                    <th className="p-3 text-left">Library</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -55,6 +61,7 @@ export default function UserActivityPage() {
                       <td className="p-3 whitespace-nowrap">{formatDate(log.createdAt)}</td>
                       <td className="p-3 font-mono text-xs text-primary">{log.action}</td>
                       <td className="p-3 text-muted-foreground">{log.details}</td>
+                      <td className="p-3 text-muted-foreground">{getLibraryFromDetails(log.details) || "—"}</td>
                     </tr>
                   ))}
                 </tbody>

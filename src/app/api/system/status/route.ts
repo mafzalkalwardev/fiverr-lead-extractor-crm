@@ -6,7 +6,7 @@ import { getScraperEngine } from "@/lib/scraper-engine";
 import { getScraperMode } from "@/lib/scraper-mode";
 
 const PYTHON_HEARTBEAT_ID = "python_scraper";
-const HEARTBEAT_MAX_AGE_MS = 35_000;
+const HEARTBEAT_MAX_AGE_MS = 75_000;
 
 type HeartbeatDoc = {
   _id: string;

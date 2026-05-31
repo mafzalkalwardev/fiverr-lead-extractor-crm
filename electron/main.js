@@ -1,5 +1,6 @@
-const { app, BrowserWindow, shell } = require("electron");
-const { spawn } = require("child_process");
+const { app, BrowserWindow, shell, dialog } = require("electron");
+const { spawn, spawnSync } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const TITLE = "Fiverr Lead Extractor CRM - FT Solutions";
@@ -8,6 +9,47 @@ const ROOT = path.join(__dirname, "..");
 
 let mainWindow;
 let childProcs = [];
+
+function readEnvValue(key) {
+  const envPath = path.join(ROOT, ".env");
+  if (!fs.existsSync(envPath)) return null;
+  const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const index = line.indexOf("=");
+    if (index <= 0) continue;
+    if (line.slice(0, index).trim().toUpperCase() === key.toUpperCase()) {
+      return line.slice(index + 1).trim();
+    }
+  }
+  return null;
+}
+
+function startLocalMongo() {
+  const script = path.join(ROOT, "scripts", "start-local-mongo.ps1");
+  const ps = path.join(
+    process.env.SystemRoot || "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe"
+  );
+  const result = spawnSync(ps, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-RootDir", ROOT], {
+    cwd: ROOT,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+
+  if (result.status !== 0) {
+    const message =
+      "Local database could not start. Please run app as Administrator once or contact FT Solutions +92307-9670503.";
+    dialog.showErrorBox("Fiverr Lead CRM", message);
+    return false;
+  }
+
+  const uri = readEnvValue("MONGODB_URI");
+  if (uri) process.env.MONGODB_URI = uri;
+  return true;
+}
 
 function runNpmScript(script) {
   const isWin = process.platform === "win32";
@@ -43,6 +85,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!startLocalMongo()) {
+    app.quit();
+    return;
+  }
+
   runNpmScript("dev");
   runNpmScript("scraper:py");
 

@@ -308,6 +308,36 @@ async def launch_browser() -> BrowserContext:
                                 return origQuery.call(this, params);
                             };
                         }
+
+                        // Force all navigation to stay in the current tab.
+                        // Verification/captcha tabs are allowed through so the
+                        // verification watcher can detect them; all other links
+                        // that Fiverr tries to open as target=_blank are
+                        // redirected to the same tab so reviews are not lost.
+                        (function() {
+                            var VERIF = ['human_touch','verification','challenge','press-hold','press_hold'];
+                            function isVerif(url) {
+                                var u = (url || '').toLowerCase();
+                                return VERIF.some(function(k){ return u.indexOf(k) !== -1; });
+                            }
+                            // Override window.open
+                            var _origOpen = window.open;
+                            window.open = function(url, name, features) {
+                                if (url && !isVerif(String(url))) {
+                                    window.location.href = url;
+                                    return window;
+                                }
+                                return _origOpen ? _origOpen.call(window, url, name, features) : null;
+                            };
+                            // Rewrite target=_blank on click before the browser acts on it
+                            document.addEventListener('click', function(e) {
+                                var el = e.target;
+                                while (el && el.tagName !== 'A') el = el.parentElement;
+                                if (el && el.target === '_blank' && el.href && !isVerif(el.href)) {
+                                    el.target = '_self';
+                                }
+                            }, true);
+                        })();
                     } catch(e) {}
                 """)
                 if config.BLOCK_HEAVY_RESOURCES:

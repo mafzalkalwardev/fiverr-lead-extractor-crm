@@ -19,6 +19,7 @@ from db import (
     record_failed_url,
     refresh_job_counters,
     save_lead_if_qualified,
+    set_heartbeat,
     update_job,
 )
 from discovery import discover_gig_urls
@@ -244,6 +245,10 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
 
     page = await get_work_page()
     for i in range(start, len(queue)):
+            try:
+                set_heartbeat()
+            except Exception:
+                pass
             current = get_job(job_id)
             if current and current.get("status") == "stopped":
                 return "stopped"
@@ -381,7 +386,11 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                     append_activity(job_id, "Browser closed — reopening on next poll. Keep Chrome open.")
                     return "verification_required"
                 state["failed_gigs"] += 1
-                err_msg = str(err).encode("ascii", errors="replace").decode("ascii")
+                err_str = str(err)
+                if "timeout" in err_str.lower() and ("60s" in err_str or "page.goto" in err_str or "TimeoutError" in type(err).__name__):
+                    err_msg = f"Gig page load timed out (network too slow); saved for retry"
+                else:
+                    err_msg = err_str.encode("ascii", errors="replace").decode("ascii")
                 artifacts = await _save_failure_artifacts(page, job_id, gig_url)
                 artifact_msg = f" {artifacts}" if artifacts else ""
                 push_error(job_id, f"{gig_url}: {err_msg}{artifact_msg}")

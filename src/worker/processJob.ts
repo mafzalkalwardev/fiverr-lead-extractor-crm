@@ -13,7 +13,7 @@ import ScrapeJob, { type IScrapeJob } from "@/models/ScrapeJob";
 import GigProgress from "@/models/GigProgress";
 import { createScraper, closeScraper } from "@/scraper/factory";
 import { pauseWithoutClosing } from "@/scraper/live/browser";
-import { processGigList, type GigProcessorState } from "./gigProcessor";
+import { processGigList, type GigProcessorState, type GigListOutcome } from "./gigProcessor";
 import {
   ScraperBlockedError,
   ScraperVerificationRequiredError,
@@ -165,7 +165,7 @@ export async function processScrapeJob(jobId: string): Promise<void> {
   }
 
   const state = initialState(job);
-  let finalStatus = "running";
+  let finalStatus: GigListOutcome | "running" | "verification_required" = "running";
 
   try {
     await appendJobLog(
@@ -435,8 +435,15 @@ export async function processScrapeJob(jobId: string): Promise<void> {
     throw err;
   } finally {
     if (finalStatus === "stopped") {
+      // Force-close: user explicitly stopped, tear down Playwright
       await closeScraper(true);
-    } else if (finalStatus !== "verification_required") {
+    } else if (
+      finalStatus === "verification_required" ||
+      finalStatus === "retry_required" ||
+      finalStatus === "paused"
+    ) {
+      // Keep browser alive — user will Resume / Retry shortly
+    } else {
       await closeScraper();
     }
   }

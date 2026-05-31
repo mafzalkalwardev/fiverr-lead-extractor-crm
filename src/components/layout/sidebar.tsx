@@ -13,6 +13,7 @@ import {
   Shield,
   ScrollText,
   Settings,
+  User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,8 @@ import { BrandLogo } from "@/components/branding";
 
 const userNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard/profile", label: "Profile", icon: User },
+  { href: "/dashboard/activity", label: "Activity", icon: ScrollText },
   { href: "/setup", label: "System Setup", icon: Settings },
   { href: "/jobs/new", label: "Create Job", icon: PlusCircle },
   { href: "/jobs", label: "Live Monitor", icon: Activity },
@@ -35,7 +38,7 @@ const adminNav = [
 ];
 
 export function Sidebar() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
   const [role, setRole] = useState<string>("user");
 
   useEffect(() => {

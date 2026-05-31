@@ -6,6 +6,14 @@ cd /d "%~dp0"
 if exist "%ProgramFiles%\nodejs\" set "PATH=%ProgramFiles%\nodejs\;%PATH%"
 if exist "%LocalAppData%\Programs\node\" set "PATH=%LocalAppData%\Programs\node\;%PATH%"
 
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\ensure-shortcuts.ps1" -AppDir "%~dp0." >nul 2>&1
+
+if not exist "tools\mongodb\bin\mongod.exe" (
+  if exist "%USERPROFILE%\Fiverr Lead Extractor CRM\tools\mongodb\bin\mongod.exe" (
+    set "FIVERR_MONGOD_EXE=%USERPROFILE%\Fiverr Lead Extractor CRM\tools\mongodb\bin\mongod.exe"
+  )
+)
+
 echo.
 echo  ============================================
 echo   Fiverr Lead Extractor CRM - FT Solutions

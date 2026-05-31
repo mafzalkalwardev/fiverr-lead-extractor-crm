@@ -5,7 +5,15 @@ import { enqueueScrapeJob } from "@/queue/scrapeQueue";
 import { appendJobLog } from "@/lib/jobLog";
 import ScrapeJob from "@/models/ScrapeJob";
 
-/** Manual backup resume after Fiverr verification; keeps saved progress. */
+const RETRYABLE_STATUSES = [
+  "verification_required",
+  "blocked",
+  "failed",
+  "retry_required",
+  "stopped",
+];
+
+/** Manual retry — keeps all saved progress (gigQueue, resumeIndex, GigProgress records). */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -16,15 +24,14 @@ export async function POST(
     await connectDB();
 
     const query =
-      user.role === "admin" ? { _id: id } : { _id: id, userId: user._id };
+      user.role === "admin"
+        ? { _id: id, status: { $in: RETRYABLE_STATUSES } }
+        : { _id: id, userId: user._id, status: { $in: RETRYABLE_STATUSES } };
+
     const job = await ScrapeJob.findOne(query);
     if (!job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
-
-    if (!["verification_required", "blocked", "failed"].includes(job.status)) {
       return NextResponse.json(
-        { error: `Cannot retry job in status: ${job.status}` },
+        { error: `Cannot retry job — not found or not in a retryable status (${RETRYABLE_STATUSES.join(", ")})` },
         { status: 400 }
       );
     }
@@ -32,19 +39,22 @@ export async function POST(
     await ScrapeJob.findByIdAndUpdate(id, {
       status: "pending",
       verificationMessage: "",
+      lastError: "",
+      $inc: { retryCount: 1 },
     });
+
     await appendJobLog(
       id,
-      "Retry queued - Python scraper will resume from saved gig index."
+      `Retry #${(job.retryCount ?? 0) + 1} queued — will continue from gig ${job.resumeIndex ?? 0}/${job.gigQueue?.length ?? 0}.`
     );
 
     await enqueueScrapeJob(id);
-    console.log("[POST /api/jobs/retry] re-queued job:", id, "resumeIndex:", job.resumeIndex);
 
     return NextResponse.json({
       ok: true,
       message: "Job re-queued. Worker will continue from saved progress.",
       resumeIndex: job.resumeIndex,
+      retryCount: (job.retryCount ?? 0) + 1,
     });
   } catch (err) {
     if (err instanceof Error && err.message === "Unauthorized") return authErrorResponse();

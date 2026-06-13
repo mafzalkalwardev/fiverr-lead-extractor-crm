@@ -1,4 +1,40 @@
-# Fiverr Lead Extractor CRM
+<div align="center">
+
+# 🚀 Fiverr Lead Extractor CRM
+
+**Full-stack CRM to extract Fiverr gig reviews (US/Canada) with Live Playwright, manual URL paste, and HTML import â€” BullMQ worker, MongoDB, Excel export, admin panel, and Electron desktop app by FT Solutions.**
+
+Documented · MIT licensed · Maintained
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+[![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+
+[Features](#-features) · [Quick Start](#-quick-start) · [Screenshots](#-screenshots) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
+
+## 🖼 Screenshots
+
+![Fiverr Lead Extractor CRM screenshot](docs/screenshots/placeholder.svg)
+
+*Replace `docs/screenshots/placeholder.svg` with real app screenshots.*
+
+---
+
+## 🐍 Contribution graph
+
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake.svg" />
+  <img alt="Contribution snake" src="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake.svg" />
+</picture>
+
+
+---
 
 <p align="center">
   <img src="https://readme-typing-svg.demolab.com?font=Inter&weight=700&size=28&duration=2600&pause=800&color=1DBF73&center=true&vCenter=true&width=860&lines=Fiverr+Lead+Extractor+CRM;Next.js+Dashboard+%2B+Python+Playwright+Scraper;Automatic+Press+%26+Hold+Verification+Handling;Review-Based+US%2FCanada+Lead+Collection" alt="Typing SVG" />

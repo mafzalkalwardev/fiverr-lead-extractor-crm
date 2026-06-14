@@ -111,6 +111,10 @@ The Python scraper watches for Fiverr verification signals such as `press & hold
 
 This is designed for continuity and reliability. It does not promise to bypass every CAPTCHA; if a challenge requires manual completion, the browser remains open and the worker continues automatically after the user finishes it.
 
+## Screenshots
+
+![fiverr-lead-extractor-crm dashboard](docs/screenshots/app.png)
+
 ## Quick Start
 
 ```powershell

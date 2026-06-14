@@ -21,6 +21,10 @@
 .claude/
 .run/
 .sixth/
+analysis_reports/
+.venv/
+venv/
+env/
 
 # debug
 npm-debug.log*
@@ -53,3 +57,7 @@ __pycache__/
 /tools/redis5/
 /tools/mongodb/bin/
 /tools/mongodb/data/
+
+# reverse-analysis raw artifacts
+*.exe
+*.zip

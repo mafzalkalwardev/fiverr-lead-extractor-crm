@@ -1,0 +1,5 @@
+PyQt6>=6.8
+PyQt6-WebEngine>=6.8
+requests==2.32.3
+pyinstaller==6.11.1
+pefile==2024.8.26

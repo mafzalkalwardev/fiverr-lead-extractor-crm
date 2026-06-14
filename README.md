@@ -159,6 +159,24 @@ npm run setup:browser:py
 npm run migrate:jobs
 ```
 
+## Reverse Engineering Workbench
+
+This repo also includes a local static-analysis workbench for authorized file review. It can inspect EXE/PE files, PowerShell scripts, Python/scripts, ZIP archives, and other file types without executing the target. Reports include hashes, strings, indicators, structure, Markdown/JSON output, and a runnable Python behavior scaffold.
+
+Run the GUI:
+
+```powershell
+py -3 -m reverse_engineering_workbench.app
+```
+
+Analyze from the CLI:
+
+```powershell
+py -3 -m reverse_engineering_workbench.app "path\to\file.exe" -o analysis_reports
+```
+
+Generated code is a behavior scaffold, not exact recovered source. Install `pefile` for deeper PE import and section parsing.
+
 ## Windows Launcher
 
 `Start Fiverr Lead CRM.bat` starts the local CRM flow: frees port `3000`, clears browser locks, starts MongoDB, launches the Next.js app and Python scraper, and opens the login page. The Electron entry is wired through `electron/main.js` for desktop-style launching.

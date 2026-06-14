@@ -10,29 +10,17 @@ Documented · MIT licensed · Maintained
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
-[Features](#-features) · [Quick Start](#-quick-start) · [Screenshots](#-screenshots) · [Contributing](CONTRIBUTING.md)
-
 </div>
 
 ---
 
-## 🖼 Screenshots
-
-![Fiverr Lead Extractor CRM screenshot](docs/screenshots/placeholder.svg)
-
-*Replace `docs/screenshots/placeholder.svg` with real app screenshots.*
-
----
-
 ## 🐍 Contribution graph
-
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake-dark.svg" />
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake.svg" />
   <img alt="Contribution snake" src="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake.svg" />
 </picture>
-
 
 ---
 
@@ -110,10 +98,6 @@ The Python scraper watches for Fiverr verification signals such as `press & hold
 5. Rechecks the original gig/search URL and resumes from the saved checkpoint after verification clears.
 
 This is designed for continuity and reliability. It does not promise to bypass every CAPTCHA; if a challenge requires manual completion, the browser remains open and the worker continues automatically after the user finishes it.
-
-## Screenshots
-
-![fiverr-lead-extractor-crm dashboard](docs/screenshots/app.png)
 
 ## Quick Start
 

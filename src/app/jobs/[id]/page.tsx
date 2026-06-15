@@ -26,13 +26,14 @@ const TERMINAL_STATUSES = new Set([
   "failed",
   "stopped",
   "blocked",
+  "lead_limit_reached",
 ]);
 
 /** Polling interval in ms based on job status */
 function pollInterval(status: string | undefined): number {
   if (!status) return 4000;
   if (TERMINAL_STATUSES.has(status)) return 15_000;
-  if (status === "retry_required" || status === "paused") return 8_000;
+  if (status === "retry_required" || status === "paused" || status === "lead_limit_reached") return 8_000;
   return 4000;
 }
 
@@ -41,6 +42,7 @@ export default function JobMonitorPage() {
   const id = params?.id ?? "";
   const { toast } = useToast();
   const [job, setJob] = useState<ScrapeJob | null>(null);
+  const [maxLeadsInput, setMaxLeadsInput] = useState<number | "">("");
 
   const fetchJob = useCallback(async () => {
     if (!id) return;
@@ -65,6 +67,12 @@ export default function JobMonitorPage() {
   }, [fetchJob, job?.status, id]);
 
   const logEndRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (job?.maxTotalLeads) {
+      setMaxLeadsInput(job.maxTotalLeads);
+    }
+  }, [job?.maxTotalLeads, job?._id]);
+
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [job?.activityLog?.length]);
@@ -93,6 +101,16 @@ export default function JobMonitorPage() {
 
   const retryJob = async () => {
     try {
+      if (
+        job?.status === "lead_limit_reached" &&
+        maxLeadsInput !== "" &&
+        Number(maxLeadsInput) > (job?.totalLeadsFound ?? 0)
+      ) {
+        await apiFetch(`/api/jobs/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ maxTotalLeads: Number(maxLeadsInput) }),
+        });
+      }
       await apiFetch(`/api/jobs/${id}/retry`, { method: "POST" });
       toast({
         title: "Retry queued",
@@ -159,6 +177,7 @@ export default function JobMonitorPage() {
   const isRetryRequired = status === "retry_required";
   const isFailed = status === "failed";
   const isStopped = status === "stopped";
+  const isLeadLimit = status === "lead_limit_reached";
 
   // ── Status hint ───────────────────────────────────────────────────────────
 
@@ -179,6 +198,7 @@ export default function JobMonitorPage() {
     failed: "Failed — see errors below",
     completed: "Completed successfully",
     stopped: "Stopped — click Continue to resume from the saved checkpoint",
+    lead_limit_reached: `Lead limit reached at gig ${job.resumeIndex ?? 0}/${job.gigQueue?.length ?? "?"} — raise max leads and Continue`,
   };
 
   const errors = job.errors || job.jobErrors || [];
@@ -274,6 +294,25 @@ export default function JobMonitorPage() {
             <Button size="sm" onClick={retryJob} className="gap-1">
               <Play className="h-4 w-4" /> Continue
             </Button>
+          )}
+
+          {/* Lead limit → raise cap + Continue */}
+          {isLeadLimit && (
+            <>
+              <input
+                type="number"
+                min={(job.totalLeadsFound ?? 0) + 1}
+                value={maxLeadsInput}
+                onChange={(e) =>
+                  setMaxLeadsInput(e.target.value ? Number(e.target.value) : "")
+                }
+                className="h-9 w-28 rounded-md border border-input bg-background px-2 text-sm"
+                title="Max total leads"
+              />
+              <Button size="sm" onClick={retryJob} className="gap-1">
+                <Play className="h-4 w-4" /> Continue
+              </Button>
+            </>
           )}
 
           {/* Pending → Stop */}

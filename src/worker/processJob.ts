@@ -62,6 +62,11 @@ async function finishJob(
       `Job ${jobId} completed: ${totalLeads} leads`,
       userId as import("mongoose").Types.ObjectId
     );
+  } else if (outcome === "lead_limit_reached") {
+    await appendJobLog(
+      jobId,
+      `Job paused at lead limit | totalLeads=${totalLeads} | remaining gigs saved in queue`
+    );
   }
 }
 

@@ -170,14 +170,28 @@ def previous_gig_urls_for_niche(job: dict, niche: str, current_job_id: str) -> s
             {"category": niche_match},
         ],
     }
-    projection = {"gigQueue": 1, "manualGigUrls": 1}
+    projection = {
+        "gigQueue": 1,
+        "manualGigUrls": 1,
+        "resumeIndex": 1,
+        "status": 1,
+    }
     seen: set[str] = set()
     for doc in jobs_col().find(query, projection):
-        for key in ("gigQueue", "manualGigUrls"):
-            for url in doc.get(key) or []:
-                norm = normalize_fiverr_url(url) or url
-                if norm:
-                    seen.add(norm)
+        queue = list(doc.get("gigQueue") or doc.get("manualGigUrls") or [])
+        if not queue:
+            continue
+        resume_idx = int(doc.get("resumeIndex") or 0)
+        status = doc.get("status") or ""
+        # Only exclude gigs actually processed — not the full saved queue on partial jobs.
+        if status == "completed" and resume_idx >= len(queue):
+            processed = queue
+        else:
+            processed = queue[: max(0, min(resume_idx, len(queue)))]
+        for url in processed:
+            norm = normalize_fiverr_url(url) or url
+            if norm:
+                seen.add(norm)
 
     lead_query = {
         "userId": user_id,

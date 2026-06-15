@@ -9,6 +9,7 @@ const statusVariant: Record<string, "default" | "success" | "warning" | "danger"
   paused: "secondary",
   retry_required: "warning",
   blocked: "danger",
+  lead_limit_reached: "warning",
   completed: "success",
   failed: "danger",
   stopped: "secondary",
@@ -19,6 +20,7 @@ const statusLabel: Record<string, string> = {
   extracting_reviews: "extracting reviews",
   verification_required: "verification required",
   retry_required: "retry required",
+  lead_limit_reached: "lead limit reached",
 };
 
 export function JobStatusBadge({ status }: { status: string }) {

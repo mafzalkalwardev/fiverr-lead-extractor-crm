@@ -313,7 +313,15 @@ async def discover_gig_urls(
             f"Search page {page_num}: +{new_count} new gigs ({len(all_urls)} total, skipped {skipped_existing} already used)",
 
         )
-        update_job(job_id, {"skippedExistingGigs": skipped_existing_total})
+        update_job(
+            job_id,
+            {
+                "skippedExistingGigs": skipped_existing_total,
+                "gigQueue": all_urls,
+                "urlsDiscovered": len(all_urls),
+                "totalGigs": len(all_urls),
+            },
+        )
 
 
 

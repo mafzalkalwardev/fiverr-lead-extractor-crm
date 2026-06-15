@@ -61,6 +61,21 @@ def _review_image_mode_label(job: dict) -> str:
     )
 
 
+def _sync_counters_from_db(job_id: str, state: dict) -> dict:
+    """Reload lead totals and limits so Continue works after maxTotalLeads is raised."""
+    current = get_job(job_id) or {}
+    state["us_leads"] = int(current.get("usLeadsFound") or state.get("us_leads") or 0)
+    state["canada_leads"] = int(current.get("canadaLeadsFound") or state.get("canada_leads") or 0)
+    state["gigs_scanned"] = int(current.get("gigsScanned") or state.get("gigs_scanned") or 0)
+    state["reviews_checked"] = int(current.get("reviewsChecked") or state.get("reviews_checked") or 0)
+    state["failed_gigs"] = int(current.get("failedGigs") or state.get("failed_gigs") or 0)
+    state["resume_index"] = int(current.get("resumeIndex") or state.get("resume_index") or 0)
+    queue = list(current.get("gigQueue") or state.get("gig_queue") or [])
+    if queue:
+        state["gig_queue"] = queue
+    return current
+
+
 async def _save_failure_artifacts(page, job_id: str, gig_url: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", gig_url.strip())[:80] or "gig"
     out_dir = Path("test-results")
@@ -235,13 +250,13 @@ async def _save_reviews(job: dict, job_id: str, gig: dict, reviews: list[dict], 
 async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int = 0) -> str:
     queue = state["gig_queue"]
     start = state["resume_index"]
-    max_leads = job.get("maxTotalLeads") or 100
     delay = job.get("delaySeconds") or 1
     max_reviews = job.get("maxReviewsPerGig")
     if max_reviews is None:
         max_reviews = 0
     image_mode = _review_image_mode(job)
     image_label = _review_image_mode_label(job)
+    stopped_reason = None
 
     page = await get_work_page()
     for i in range(start, len(queue)):
@@ -249,10 +264,18 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                 set_heartbeat()
             except Exception:
                 pass
-            current = get_job(job_id)
-            if current and current.get("status") == "stopped":
+            current = _sync_counters_from_db(job_id, state)
+            queue = state["gig_queue"]
+            max_leads = int(current.get("maxTotalLeads") or job.get("maxTotalLeads") or 100)
+            if current.get("status") == "stopped":
                 return "stopped"
             if state["us_leads"] + state["canada_leads"] >= max_leads:
+                stopped_reason = "lead_limit"
+                append_activity(
+                    job_id,
+                    f"Lead limit reached ({max_leads}). Pausing at gig {i + 1}/{len(queue)} "
+                    f"with {len(queue) - i} gig(s) remaining.",
+                )
                 break
 
             gig_url = queue[i]
@@ -404,7 +427,11 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                 refresh_job_counters(job_id, state)
 
     failed_urls = list(dict.fromkeys(state.get("failed_urls") or []))
-    if failed_urls and retry_pass < config.MAX_FAILED_URL_RETRY_PASSES:
+    if (
+        stopped_reason != "lead_limit"
+        and failed_urls
+        and retry_pass < config.MAX_FAILED_URL_RETRY_PASSES
+    ):
         append_activity(
             job_id,
             f"Retrying {len(failed_urls)} failed gig(s) once before completing",
@@ -425,7 +452,7 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
             },
         )
         outcome = await process_gig_list(job, job_id, state, retry_pass + 1)
-        if outcome == "completed":
+        if outcome in ("completed", "lead_limit_reached"):
             state["gig_queue"] = original_queue
             state["resume_index"] = original_resume
             update_job(
@@ -438,6 +465,36 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
             )
         return outcome
 
+    queue = state["gig_queue"]
+    resume_idx = state.get("resume_index", 0)
+    remaining = max(0, len(queue) - resume_idx)
+    total_leads = state["us_leads"] + state["canada_leads"]
+    current = get_job(job_id) or job
+    max_leads = int(current.get("maxTotalLeads") or job.get("maxTotalLeads") or 100)
+
+    if stopped_reason == "lead_limit" and remaining > 0:
+        update_job(
+            job_id,
+            {
+                "status": "lead_limit_reached",
+                "progressPercent": int((resume_idx / max(len(queue), 1)) * 100),
+                "currentGigLink": "",
+                "currentSeller": "",
+                "currentSellerUsername": "",
+                "gigQueue": queue,
+                "resumeIndex": resume_idx,
+                "totalGigs": len(queue),
+                "totalLeadsFound": total_leads,
+            },
+        )
+        append_activity(
+            job_id,
+            f"Paused at lead limit ({total_leads}/{max_leads}). "
+            f"{remaining} gig(s) left — raise max leads and click Continue.",
+        )
+        await release_work_page_after_job()
+        return "lead_limit_reached"
+
     update_job(
         job_id,
         {
@@ -446,9 +503,12 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
             "currentGigLink": "",
             "currentSeller": "",
             "currentSellerUsername": "",
+            "gigQueue": queue,
+            "resumeIndex": resume_idx,
+            "totalGigs": len(queue),
         },
     )
-    append_activity(job_id, f"Completed · {state['us_leads'] + state['canada_leads']} leads")
+    append_activity(job_id, f"Completed · {total_leads} leads")
     await release_work_page_after_job()
     return "completed"
 
@@ -547,6 +607,16 @@ async def process_job(job: dict) -> None:
 
         state["gig_queue"] = queue
         state["resume_index"] = job.get("resumeIndex") or 0
+        if state["resume_index"] >= len(queue):
+            update_job(job_id, {"status": "completed", "progressPercent": 100})
+            append_activity(job_id, f"All {len(queue)} gigs already processed")
+            return
+        if state["resume_index"] > 0:
+            append_activity(
+                job_id,
+                f"Resuming from gig {state['resume_index'] + 1}/{len(queue)} "
+                f"({len(queue) - state['resume_index']} remaining)",
+            )
         append_activity(job_id, "Extracting reviews from gig pages")
         await process_gig_list(job, job_id, state)
 

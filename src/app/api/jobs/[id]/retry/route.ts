@@ -11,6 +11,8 @@ const RETRYABLE_STATUSES = [
   "failed",
   "retry_required",
   "stopped",
+  "lead_limit_reached",
+  "completed",
 ];
 
 /** Manual retry — keeps all saved progress (gigQueue, resumeIndex, GigProgress records). */
@@ -32,6 +34,15 @@ export async function POST(
     if (!job) {
       return NextResponse.json(
         { error: `Cannot retry job — not found or not in a retryable status (${RETRYABLE_STATUSES.join(", ")})` },
+        { status: 400 }
+      );
+    }
+
+    const queueLen = job.gigQueue?.length ?? 0;
+    const resumeIdx = job.resumeIndex ?? 0;
+    if (job.status === "completed" && resumeIdx >= queueLen) {
+      return NextResponse.json(
+        { error: "Job already completed all discovered gigs." },
         { status: 400 }
       );
     }

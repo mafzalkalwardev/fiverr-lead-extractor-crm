@@ -29,6 +29,7 @@ export interface GigProcessorState {
 
 export type GigListOutcome =
   | "completed"
+  | "lead_limit_reached"
   | "verification_required"
   | "stopped"
   | "paused"
@@ -161,6 +162,7 @@ export async function processGigList(
   state: GigProcessorState
 ): Promise<GigListOutcome> {
   const totalSteps = Math.max(gigUrls.length, 1);
+  let stoppedReason: "lead_limit" | null = null;
 
   for (let i = startIndex; i < gigUrls.length; i++) {
     // Skip gigs already completed (safety net)
@@ -187,7 +189,24 @@ export async function processGigList(
       return "paused";
     }
 
-    if (state.totalLeads >= job.maxTotalLeads) break;
+    const freshJob = await ScrapeJob.findById(jobId)
+      .select("maxTotalLeads usLeadsFound canadaLeadsFound totalLeadsFound")
+      .lean();
+    if (freshJob) {
+      state.usLeads = freshJob.usLeadsFound || 0;
+      state.canadaLeads = freshJob.canadaLeadsFound || 0;
+      state.totalLeads = freshJob.totalLeadsFound || state.usLeads + state.canadaLeads;
+      job.maxTotalLeads = freshJob.maxTotalLeads ?? job.maxTotalLeads;
+    }
+
+    if (state.totalLeads >= job.maxTotalLeads) {
+      stoppedReason = "lead_limit";
+      await appendJobLog(
+        jobId,
+        `Lead limit reached (${state.totalLeads}/${job.maxTotalLeads}). Pausing at gig ${i + 1}/${gigUrls.length}.`
+      );
+      break;
+    }
 
     const gigUrl = gigUrls[i];
     console.log(`[worker] Gig ${i + 1}/${gigUrls.length}: ${gigUrl}`);
@@ -390,6 +409,29 @@ export async function processGigList(
         `${/selectors failed/i.test(msg) ? "selectors failed" : "Gig failed"}: gig ${i + 1}/${gigUrls.length} | ${gigUrl} | ${msg}`
       );
     }
+  }
+
+  const resumeIdx =
+    (await ScrapeJob.findById(jobId).select("resumeIndex").lean())?.resumeIndex ??
+    startIndex;
+  const remaining = Math.max(0, gigUrls.length - resumeIdx);
+
+  if (stoppedReason === "lead_limit" && remaining > 0) {
+    await ScrapeJob.findByIdAndUpdate(jobId, {
+      status: "lead_limit_reached",
+      gigQueue: gigUrls,
+      resumeIndex: resumeIdx,
+      totalGigs: gigUrls.length,
+      progressPercent: Math.round((resumeIdx / totalSteps) * 100),
+      totalLeadsFound: state.totalLeads,
+      usLeadsFound: state.usLeads,
+      canadaLeadsFound: state.canadaLeads,
+    });
+    await appendJobLog(
+      jobId,
+      `Paused at lead limit (${state.totalLeads}/${job.maxTotalLeads}). ${remaining} gig(s) remaining — raise max leads and Continue.`
+    );
+    return "lead_limit_reached";
   }
 
   return "completed";

@@ -10,6 +10,7 @@ export type JobStatus =
   | "paused"
   | "retry_required"
   | "blocked"
+  | "lead_limit_reached"
   | "completed"
   | "failed"
   | "stopped";
@@ -94,6 +95,7 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
         "paused",
         "retry_required",
         "blocked",
+        "lead_limit_reached",
         "completed",
         "failed",
         "stopped",

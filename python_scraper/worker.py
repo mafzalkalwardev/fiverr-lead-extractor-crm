@@ -513,6 +513,71 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
     return "completed"
 
 
+async def _maybe_append_discovery(
+    job: dict, job_id: str, niche: str, state: dict, outcome: str
+) -> str:
+    """After a continued queue finishes, optionally discover and process new gigs."""
+    if outcome != "completed":
+        return outcome
+    if not job.get("appendDiscoveryAfterQueue"):
+        return outcome
+
+    current = get_job(job_id) or job
+    if not current.get("appendDiscoveryAfterQueue"):
+        return outcome
+
+    update_job(job_id, {"appendDiscoveryAfterQueue": False})
+    existing_queue = list(state.get("gig_queue") or current.get("gigQueue") or [])
+    processed_count = len(existing_queue)
+
+    append_activity(
+        job_id,
+        f"Previous queue complete ({processed_count} gigs) — searching Fiverr for additional gigs",
+    )
+    update_job(job_id, {"status": "discovering_gigs"})
+
+    max_gigs = current.get("maxGigs")
+    if max_gigs is None:
+        max_gigs = 0
+    seen_before = previous_gig_urls_for_niche(current, niche, job_id)
+    seen = set(seen_before)
+    for url in existing_queue:
+        norm = normalize_fiverr_url(url) or url
+        if norm:
+            seen.add(norm)
+
+    urls, source = await discover_gig_urls(
+        niche,
+        max_gigs,
+        job_id,
+        exclude_urls=seen,
+    )
+    new_urls = [u for u in urls if (normalize_fiverr_url(u) or u) not in seen]
+
+    if not new_urls:
+        append_activity(job_id, "No additional gigs found on Fiverr search")
+        return outcome
+
+    merged = existing_queue + new_urls
+    state["gig_queue"] = merged
+    state["resume_index"] = processed_count
+    update_job(
+        job_id,
+        {
+            "discoverySource": source,
+            "gigQueue": merged,
+            "urlsDiscovered": len(merged),
+            "totalGigs": len(merged),
+            "resumeIndex": processed_count,
+        },
+    )
+    append_activity(
+        job_id,
+        f"Appended {len(new_urls)} new gig(s) — continuing from gig {processed_count + 1}/{len(merged)}",
+    )
+    return await process_gig_list(current, job_id, state)
+
+
 async def process_job(job: dict) -> None:
     job_id = str(job["_id"])
     niche = (job.get("niche") or "").strip()
@@ -584,6 +649,8 @@ async def process_job(job: dict) -> None:
                 exclude_urls=seen_before,
             )
             queue = urls
+            state["gig_queue"] = queue
+            state["resume_index"] = 0
             update_job(
                 job_id,
                 {
@@ -605,8 +672,18 @@ async def process_job(job: dict) -> None:
                 push_error(job_id, "No gig URLs found — complete verification and Retry")
                 return
 
+            outcome = await process_gig_list(job, job_id, state)
+            if job.get("appendDiscoveryAfterQueue"):
+                await _maybe_append_discovery(job, job_id, niche, state, outcome)
+            return
+
         state["gig_queue"] = queue
         state["resume_index"] = job.get("resumeIndex") or 0
+        if job.get("continuedFromJobId"):
+            append_activity(
+                job_id,
+                f"Loaded {len(queue)} unprocessed gig(s) continued from prior job",
+            )
         if state["resume_index"] >= len(queue):
             update_job(job_id, {"status": "completed", "progressPercent": 100})
             append_activity(job_id, f"All {len(queue)} gigs already processed")
@@ -618,7 +695,9 @@ async def process_job(job: dict) -> None:
                 f"({len(queue) - state['resume_index']} remaining)",
             )
         append_activity(job_id, "Extracting reviews from gig pages")
-        await process_gig_list(job, job_id, state)
+        outcome = await process_gig_list(job, job_id, state)
+        if mode == "live" and job.get("appendDiscoveryAfterQueue"):
+            outcome = await _maybe_append_discovery(job, job_id, niche, state, outcome)
 
     except Exception as err:
         if is_browser_closed_error(err):

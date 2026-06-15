@@ -278,13 +278,37 @@ export async function processScrapeJob(jobId: string): Promise<void> {
     }
 
     // ── Live mode ──────────────────────────────────────────────────────────
-    // Check if URLs were already discovered for this job
     const existingProgressCount = await GigProgress.countDocuments({ jobId });
+    const preseededQueue = (job.gigQueue || [])
+      .map((u) => normalizeFiverrUrl(u))
+      .filter(Boolean) as string[];
 
     let gigUrls: string[];
     let startIndex: number;
 
-    if (existingProgressCount > 0) {
+    if (
+      preseededQueue.length > 0 &&
+      (job.discoverySource === "cached_queue" || job.continuedFromJobId)
+    ) {
+      await ensureGigProgressRecords(jobId, preseededQueue);
+      gigUrls = preseededQueue;
+      startIndex = job.resumeIndex || 0;
+
+      await ScrapeJob.findByIdAndUpdate(jobId, {
+        status: "extracting_reviews",
+        gigQueue: gigUrls,
+        resumeIndex: startIndex,
+        urlsDiscovered: gigUrls.length,
+        totalGigs: gigUrls.length,
+      });
+
+      await appendJobLog(
+        jobId,
+        `Loaded ${gigUrls.length} gig(s) from previous job queue${
+          job.continuedFromJobId ? ` (continued from ${job.continuedFromJobId})` : ""
+        }`
+      );
+    } else if (existingProgressCount > 0) {
       // URLs already discovered — load them from GigProgress in original order
       const stuckCount = await resetProcessingGigs(jobId);
       if (stuckCount > 0) {

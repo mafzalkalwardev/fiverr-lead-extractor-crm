@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Image as ImageIcon, ImageOff } from "lucide-react";
+import { Image as ImageIcon, ImageOff, History } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,17 @@ import type { ScrapeJob } from "@/types";
 import { WorkerStatusBanner } from "@/components/worker-status-banner";
 import { cn } from "@/lib/utils";
 
+interface ContinuableJob {
+  _id: string;
+  niche: string;
+  status: string;
+  createdAt: string;
+  totalInQueue: number;
+  processedCount: number;
+  remainingCount: number;
+  totalLeadsFound: number;
+}
+
 export default function NewJobPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -38,6 +49,37 @@ export default function NewJobPage() {
     maxTotalLeads: 500,
     delaySeconds: 1,
   });
+  const [continuePrevious, setContinuePrevious] = useState(false);
+  const [continueFromJobId, setContinueFromJobId] = useState("");
+  const [discoverNewGigsAfterQueue, setDiscoverNewGigsAfterQueue] = useState(true);
+  const [continuableJobs, setContinuableJobs] = useState<ContinuableJob[]>([]);
+  const [loadingContinuable, setLoadingContinuable] = useState(false);
+
+  const fetchContinuable = useCallback(async () => {
+    if (mode !== "live" || niche.trim().length < 2) {
+      setContinuableJobs([]);
+      return;
+    }
+    setLoadingContinuable(true);
+    try {
+      const data = await apiFetch<{ jobs: ContinuableJob[] }>(
+        `/api/jobs/continuation?niche=${encodeURIComponent(niche.trim())}`
+      );
+      setContinuableJobs(data.jobs || []);
+      if (data.jobs?.length === 1) {
+        setContinueFromJobId(data.jobs[0]._id);
+      }
+    } catch {
+      setContinuableJobs([]);
+    } finally {
+      setLoadingContinuable(false);
+    }
+  }, [mode, niche]);
+
+  useEffect(() => {
+    const t = setTimeout(fetchContinuable, 400);
+    return () => clearTimeout(t);
+  }, [fetchContinuable]);
 
   const toggleCountry = (c: string) => {
     setCountries((prev) =>
@@ -62,6 +104,12 @@ export default function NewJobPage() {
     if (mode === "html_import" && (!htmlFiles || htmlFiles.length === 0)) {
       toast({ title: "Select HTML file(s) to upload" });
       return;
+    }
+    if (continuePrevious && mode === "live") {
+      if (!continueFromJobId) {
+        toast({ title: "Select a previous job to continue from" });
+        return;
+      }
     }
 
     setLoading(true);
@@ -101,6 +149,12 @@ export default function NewJobPage() {
             reviewImageMode,
             ...form,
             maxGigs: mode === "manual_urls" ? Math.min(form.maxGigs, manualUrls.split(/\n/).length) : form.maxGigs,
+            ...(continuePrevious && mode === "live"
+              ? {
+                  continueFromJobId,
+                  discoverNewGigsAfterQueue,
+                }
+              : {}),
           }),
         });
       }
@@ -178,6 +232,73 @@ export default function NewJobPage() {
                 required
               />
             </div>
+
+            {mode === "live" && (
+              <div className="space-y-3 rounded-lg border border-border/80 bg-muted/20 p-4">
+                <div className="flex items-start gap-3">
+                  <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="flex-1 space-y-3">
+                    <div>
+                      <p className="font-medium text-sm">Continue from previous job</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Pick up unprocessed gigs from an earlier run (e.g. after a month). Already-saved
+                        leads are skipped automatically; then optionally search Fiverr for new gigs.
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={continuePrevious}
+                        onChange={(e) => {
+                          setContinuePrevious(e.target.checked);
+                          if (!e.target.checked) setContinueFromJobId("");
+                        }}
+                        className="rounded border-input"
+                      />
+                      Continue unprocessed gigs from a previous job
+                    </label>
+                    {continuePrevious && (
+                      <>
+                        <div className="space-y-2">
+                          <Label htmlFor="continueJob">Previous job</Label>
+                          <select
+                            id="continueJob"
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={continueFromJobId}
+                            onChange={(e) => setContinueFromJobId(e.target.value)}
+                            disabled={loadingContinuable}
+                          >
+                            <option value="">
+                              {loadingContinuable
+                                ? "Loading…"
+                                : continuableJobs.length
+                                  ? "Select a job…"
+                                  : "No jobs with remaining gigs for this niche"}
+                            </option>
+                            {continuableJobs.map((j) => (
+                              <option key={j._id} value={j._id}>
+                                {j.remainingCount} gigs left · {j.processedCount}/{j.totalInQueue}{" "}
+                                processed · {j.totalLeadsFound} leads ·{" "}
+                                {new Date(j.createdAt).toLocaleDateString()}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={discoverNewGigsAfterQueue}
+                            onChange={(e) => setDiscoverNewGigsAfterQueue(e.target.checked)}
+                            className="rounded border-input"
+                          />
+                          After queue finishes, search Fiverr for new gigs
+                        </label>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Review Image Option</Label>

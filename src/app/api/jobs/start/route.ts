@@ -18,6 +18,8 @@ import { isRedisConnectionError } from "@/queue/connection";
 import { enqueueScrapeJob } from "@/queue/scrapeQueue";
 import { normalizeFiverrUrl } from "@/scraper/fiverr/urls";
 import ScrapeJob from "@/models/ScrapeJob";
+import { loadContinuationQueue } from "@/lib/job-continuation";
+import { appendJobLog } from "@/lib/jobLog";
 
 async function saveHtmlFiles(
   jobId: string,
@@ -137,6 +139,22 @@ export async function POST(req: NextRequest) {
 
     await connectDB();
 
+    let continuationTail: string[] = [];
+    let continuedFromJobId: string | undefined;
+    let appendDiscoveryAfterQueue = false;
+    const continueFromJobId = String(body.continueFromJobId || "").trim();
+
+    if (continueFromJobId && extractionMode === "live") {
+      const { tail, source } = await loadContinuationQueue(
+        user._id,
+        continueFromJobId,
+        user.role === "admin"
+      );
+      continuationTail = tail;
+      continuedFromJobId = source._id.toString();
+      appendDiscoveryAfterQueue = body.discoverNewGigsAfterQueue !== false;
+    }
+
     const job = await ScrapeJob.create({
       userId: user._id,
       niche,
@@ -147,11 +165,26 @@ export async function POST(req: NextRequest) {
       ...limits,
       status: "pending",
       manualGigUrls,
-      gigQueue: manualGigUrls,
+      gigQueue: continuationTail.length ? continuationTail : manualGigUrls,
+      resumeIndex: 0,
+      urlsDiscovered: continuationTail.length || manualGigUrls.length,
+      totalGigs: continuationTail.length || manualGigUrls.length,
+      discoverySource: continuationTail.length ? "cached_queue" : "",
+      continuedFromJobId: continuedFromJobId || undefined,
+      appendDiscoveryAfterQueue,
       errorLog: [],
     });
 
     const jobId = job._id.toString();
+
+    if (continuationTail.length) {
+      await appendJobLog(
+        jobId,
+        `Continuing ${continuationTail.length} unprocessed gig(s) from job ${continuedFromJobId}${
+          appendDiscoveryAfterQueue ? " — will search for new gigs after queue" : ""
+        }`
+      );
+    }
 
     if (extractionMode === "html_import" && htmlFiles.length > 0) {
       const saved = await saveHtmlFiles(jobId, htmlFiles);

@@ -2,7 +2,7 @@
 
 # ðŸš€ Fiverr Lead Extractor CRM
 
-**Full-stack CRM to extract Fiverr gig reviews (US/Canada) with Live Playwright, manual URL paste, and HTML import Ã¢â‚¬â€ BullMQ worker, MongoDB, Excel export, admin panel, and Electron desktop app.**
+**Full-stack CRM to extract Fiverr gig reviews (US/Canada) with Live Playwright, manual URL paste, and HTML import - BullMQ worker, MongoDB, Excel export, admin panel, and Electron desktop app.**
 
 Documented - MIT licensed - Maintained
 

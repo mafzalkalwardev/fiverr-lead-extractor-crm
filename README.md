@@ -1,10 +1,10 @@
-<div align="center">
+﻿<div align="center">
 
-# 🚀 Fiverr Lead Extractor CRM
+# ðŸš€ Fiverr Lead Extractor CRM
 
-**Full-stack CRM to extract Fiverr gig reviews (US/Canada) with Live Playwright, manual URL paste, and HTML import â€” BullMQ worker, MongoDB, Excel export, admin panel, and Electron desktop app by FT Solutions.**
+**Full-stack CRM to extract Fiverr gig reviews (US/Canada) with Live Playwright, manual URL paste, and HTML import Ã¢â‚¬â€ BullMQ worker, MongoDB, Excel export, admin panel, and Electron desktop app.**
 
-Documented · MIT licensed · Maintained
+Documented - MIT licensed - Maintained
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
@@ -19,7 +19,7 @@ Documented · MIT licensed · Maintained
 ![Application screenshot](docs/screenshots/app.png)
 
 
-## 🐍 Contribution graph
+## ðŸ Contribution graph
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake-dark.svg" />
@@ -190,3 +190,4 @@ Generated code is a behavior scaffold, not exact recovered source. Install `pefi
 <p align="center">
   <img src="https://raw.githubusercontent.com/mafzalkalwardev/mafzalkalwardev/output/github-contribution-grid-snake.svg" alt="Contribution snake" />
 </p>
+

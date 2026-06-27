@@ -1,6 +1,6 @@
 ﻿<div align="center">
 
-# ðŸš€ Fiverr Lead Extractor CRM
+# 🚀 Fiverr Lead Extractor CRM
 
 **Full-stack CRM to extract Fiverr gig reviews (US/Canada) with Live Playwright, manual URL paste, and HTML import - BullMQ worker, MongoDB, Excel export, admin panel, and Electron desktop app.**
 
@@ -16,10 +16,10 @@ Documented - MIT licensed - Maintained
 
 ## Screenshots
 
-![Application screenshot](docs/screenshots/app.png)
+See the [portfolio demos page](https://mafzalkalwardev.github.io/demos.html) for project previews. Capture locally after `npm run client:start:fast` with demo data only.
 
 
-## ðŸ Contribution graph
+## 🐍 Contribution graph
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake-dark.svg" />
@@ -102,12 +102,25 @@ The Python scraper watches for Fiverr verification signals such as `press & hold
 4. Runs automatic hold attempts with natural mouse movement and configurable retry timing.
 5. Rechecks the original gig/search URL and resumes from the saved checkpoint after verification clears.
 
-This is designed for continuity and reliability. It does not promise to bypass every CAPTCHA; if a challenge requires manual completion, the browser remains open and the worker continues automatically after the user finishes it.
+This is designed for continuity and reliability on authorized research workflows. It does not promise to bypass every verification challenge; if manual completion is required, the browser remains open and the worker continues after the challenge clears.
+
+---
+
+## Compliance and Responsible Use
+
+This project is intended for lawful research on public marketplace data you are authorized to access. Respect Fiverr terms of service, rate limits, privacy rules, and applicable laws. Do not harass sellers or buyers, scrape private data, or use extracted contacts for spam or unsolicited outreach.
+
+Use permission-based outreach, opt-out handling, and business identification when contacting leads. The maintainers are not responsible for misuse of this software.
+
+**Status:** Client-ready · local CRM · use demo/sample data for screenshots
+
+---
 
 ## Quick Start
 
 ```powershell
-cd "C:\Users\pc\Desktop\Fiverr Scraper"
+git clone https://github.com/mafzalkalwardev/fiverr-lead-extractor-crm.git
+cd fiverr-lead-extractor-crm
 npm install
 python -m venv venv
 venv\Scripts\activate

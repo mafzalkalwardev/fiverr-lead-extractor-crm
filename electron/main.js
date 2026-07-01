@@ -1,3 +1,4 @@
+const { requireIndusLicense } = require('./lib/indus_license');
 const { app, BrowserWindow, shell, dialog } = require("electron");
 const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
@@ -84,7 +85,15 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try {
+    await requireIndusLicense(ROOT);
+  } catch (err) {
+    dialog.showErrorBox('INDUS License', err.message || String(err));
+    app.quit();
+    return;
+  }
+
   if (!startLocalMongo()) {
     app.quit();
     return;

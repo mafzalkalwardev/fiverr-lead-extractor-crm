@@ -1,4 +1,4 @@
-const { requireIndusLicense } = require('./lib/indus_license');
+const { requireIndusLicense } = require("../lib/indus_license");
 const { app, BrowserWindow, shell, dialog } = require("electron");
 const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");

@@ -22,9 +22,9 @@ See the [portfolio demos page](https://mafzalkalwardev.github.io/demos.html) for
 ## 🐍 Contribution graph
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake-dark.svg" />
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake.svg" />
-  <img alt="Contribution snake" src="https://raw.githubusercontent.com/mafzalkalwardev/fiverr-lead-extractor-crm/output/snake.svg" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/mafzalkalwardev/output/github-contribution-grid-snake-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/mafzalkalwardev/output/github-contribution-grid-snake.svg" />
+  <img alt="Contribution snake" src="https://raw.githubusercontent.com/mafzalkalwardev/mafzalkalwardev/output/github-contribution-grid-snake.svg" />
 </picture>
 
 ---
@@ -65,8 +65,8 @@ The standout achievement is the automatic verification workflow for Fiverr press
 | Automation | PowerShell, BAT, Electron | Starts MongoDB, frees ports, clears browser locks, runs web app and scraper together. |
 
 <p align="center">
-  <img src="https://github-readme-stats.vercel.app/api?username=mafzalkalwardev&show_icons=true&theme=github_dark&hide_border=true&title_color=1DBF73&icon_color=1DBF73" alt="GitHub stats" />
-  <img src="https://github-readme-streak-stats.herokuapp.com?user=mafzalkalwardev&theme=dark&hide_border=true&ring=1DBF73&fire=1DBF73&currStreakLabel=1DBF73" alt="GitHub streak" />
+  <img src="https://github-readme-stats-sigma-five.vercel.app/api?username=mafzalkalwardev&show_icons=true&theme=github_dark&hide_border=true&title_color=1DBF73&icon_color=1DBF73" alt="GitHub stats" />
+  <img src="https://streak-stats.demolab.com?user=mafzalkalwardev&theme=dark&hide_border=true&ring=1DBF73&fire=1DBF73&currStreakLabel=1DBF73" alt="GitHub streak" />
 </p>
 
 ## Activity Graph

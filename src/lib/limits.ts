@@ -7,7 +7,7 @@ export function clampJobLimits(input: {
 }) {
   const maxGigsLimit = Number(process.env.MAX_GIGS_LIMIT ?? 0);
   const maxReviewsLimit = Number(process.env.MAX_REVIEWS_PER_GIG_LIMIT) || 500;
-  const maxLeadsLimit = Number(process.env.MAX_TOTAL_LEADS_LIMIT) || 500;
+  const maxLeadsLimit = Number(process.env.MAX_TOTAL_LEADS_LIMIT) || 5000;
   const minDelay = Number(process.env.DEFAULT_DELAY_SECONDS) || 1;
 
   const maxReviewsPerGig =

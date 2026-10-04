@@ -429,12 +429,15 @@ export default function NewJobPage() {
                   <Input
                     type="number"
                     min={1}
-                    max={500}
+                    max={5000}
                     value={form.maxTotalLeads}
                     onChange={(e) =>
                       setForm({ ...form, maxTotalLeads: Number(e.target.value) })
                     }
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Up to 5000 leads per job.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Delay (seconds)</Label>

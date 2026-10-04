@@ -42,6 +42,8 @@ const LeadSchema = new Schema<ILead>(
 );
 
 LeadSchema.index({ jobId: 1, dedupeKey: 1 }, { unique: true });
+// Soft unique across jobs for the same account (enforced in saveLeadIfQualified too)
+LeadSchema.index({ userId: 1, dedupeKey: 1 });
 
 const Lead: Model<ILead> =
   mongoose.models.Lead || mongoose.model<ILead>("Lead", LeadSchema);

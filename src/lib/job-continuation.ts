@@ -59,7 +59,7 @@ export async function findContinuableJobs(
   const match = nicheRegex(niche);
   const query = {
     ...(isAdmin ? {} : { userId }),
-    extractionMode: "live",
+    extractionMode: { $in: ["live", "manual_urls"] },
     status: { $in: CONTINUABLE_STATUSES },
     $or: [{ niche: match }, { keyword: match }, { category: match }],
   };
@@ -102,8 +102,8 @@ export async function loadContinuationQueue(
   if (!source) {
     throw new Error("Source job not found");
   }
-  if (source.extractionMode !== "live") {
-    throw new Error("Only live search jobs can be continued");
+  if (source.extractionMode !== "live" && source.extractionMode !== "manual_urls") {
+    throw new Error("Only live search or paste-gig-link jobs can be continued");
   }
 
   const tail = getUnprocessedQueueTail(source);

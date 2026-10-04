@@ -81,6 +81,17 @@ export async function saveLeadIfQualified(
     input.review.reviewText.trim()
   );
 
+  // Cross-job dedupe for the same user — resume/continue must not re-save leads
+  const existing = await Lead.findOne({
+    userId: input.userId,
+    dedupeKey,
+  })
+    .select("_id")
+    .lean();
+  if (existing) {
+    return { saved: false, country, reason: "duplicate" };
+  }
+
   try {
     await Lead.create({
       jobId: input.jobId,

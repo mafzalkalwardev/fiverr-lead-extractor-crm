@@ -22,9 +22,34 @@ export const VERIFICATION_MESSAGE =
   "Complete Fiverr verification in the opened browser. The app will continue automatically. Do NOT close browser window.";
 
 export function parseGigUrlsFromText(text: string): string[] {
-  const urls = text.match(/https?:\/\/[^\s]+/g) || [];
+  // Accept http(s), www., and bare fiverr.com/seller/gig paths pasted one per line
+  const raw = text
+    .split(/[\n\r,;\t]+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const urls: string[] = [];
+  for (const line of raw) {
+    const match = line.match(/https?:\/\/[^\s]+/i);
+    if (match) {
+      urls.push(match[0].replace(/[),.;]+$/, "").trim());
+      continue;
+    }
+    if (/^(www\.)?fiverr\.com\//i.test(line)) {
+      urls.push(`https://${line.replace(/^www\./i, "")}`);
+      continue;
+    }
+    if (/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+/.test(line) && !line.includes(" ")) {
+      // seller/gig-slug without host
+      urls.push(`https://www.fiverr.com/${line}`);
+    }
+  }
+
   const seen = new Set<string>();
-  return urls
-    .map((u) => u.replace(/[),.;]+$/, "").trim())
-    .filter((u) => u.includes("fiverr.com") && !seen.has(u) && seen.add(u));
+  return urls.filter((u) => {
+    const key = u.toLowerCase();
+    if (!key.includes("fiverr.com") || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

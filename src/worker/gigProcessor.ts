@@ -261,10 +261,16 @@ export async function processGigList(
 
       let savedForGig = 0;
       let skippedForGig = 0;
+      let hitLeadLimitMidGig = false;
+      let remainingReviews = 0;
 
       for (let reviewIndex = 0; reviewIndex < reviews.length; reviewIndex++) {
         const review = reviews[reviewIndex];
-        if (state.totalLeads >= job.maxTotalLeads) break;
+        if (state.totalLeads >= job.maxTotalLeads) {
+          hitLeadLimitMidGig = true;
+          remainingReviews = reviews.length - reviewIndex;
+          break;
+        }
         const reviewForSave =
           (job.reviewImageMode || "with_image") === "without_image"
             ? { ...review, reviewedImageLink: "" }
@@ -311,6 +317,26 @@ export async function processGigList(
             canadaLeadsFound: state.canadaLeads,
           });
         }
+      }
+
+      if (hitLeadLimitMidGig) {
+        // Keep this gig pending so Continue reopens it for remaining reviews
+        await resetGigToPending(jobId, i);
+        await ScrapeJob.findByIdAndUpdate(jobId, {
+          gigsScanned: state.gigsScanned,
+          reviewsChecked: state.reviewsChecked,
+          usLeadsFound: state.usLeads,
+          canadaLeadsFound: state.canadaLeads,
+          totalLeadsFound: state.totalLeads,
+          totalReviewsParsed: state.reviewsChecked,
+          resumeIndex: i,
+        });
+        stoppedReason = "lead_limit";
+        await appendJobLog(
+          jobId,
+          `Lead limit reached mid-gig ${i + 1}/${gigUrls.length}: saved=${savedForGig}, ${remainingReviews} review(s) still pending on this gig`
+        );
+        break;
       }
 
       await markGigCompleted(jobId, i, reviewsChecked ?? reviews.length, savedForGig);

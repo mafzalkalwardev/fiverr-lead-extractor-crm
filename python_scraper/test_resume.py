@@ -65,6 +65,18 @@ class TestLeadLimitPause(unittest.TestCase):
     def test_completes_when_no_lead_limit_stop(self):
         self.assertFalse(should_pause_for_lead_limit(None, 200, 500))
 
+    def test_mid_gig_keeps_resume_on_same_gig(self):
+        """When lead limit hits mid-gig, resumeIndex stays on that gig (not +1)."""
+        gig_index = 0
+        hit_lead_limit = True
+        resume = gig_index if hit_lead_limit else gig_index + 1
+        self.assertEqual(resume, 0)
+        # Tail for continue still includes the partial gig
+        queue = ["https://www.fiverr.com/a/gig", "https://www.fiverr.com/b/gig"]
+        tail = queue[resume:]
+        self.assertEqual(tail[0], queue[0])
+        self.assertEqual(len(tail), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

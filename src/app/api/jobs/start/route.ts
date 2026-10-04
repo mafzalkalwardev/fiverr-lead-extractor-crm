@@ -115,18 +115,45 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    await connectDB();
+
+    let continuationTail: string[] = [];
+    let continuedFromJobId: string | undefined;
+    let appendDiscoveryAfterQueue = false;
+    const continueFromJobId = String(body.continueFromJobId || "").trim();
+
+    if (
+      continueFromJobId &&
+      (extractionMode === "live" || extractionMode === "manual_urls")
+    ) {
+      const { tail, source } = await loadContinuationQueue(
+        user._id,
+        continueFromJobId,
+        user.role === "admin"
+      );
+      continuationTail = tail;
+      continuedFromJobId = source._id.toString();
+      // Only auto-search for more gigs after a live queue finishes
+      appendDiscoveryAfterQueue =
+        extractionMode === "live" && body.discoverNewGigsAfterQueue !== false;
+    }
+
     let manualGigUrls: string[] = [];
     if (extractionMode === "manual_urls") {
-      const raw = String(body.manualGigUrls || "");
-      manualGigUrls = parseGigUrlsFromText(raw).flatMap((u) => {
-        const normalized = normalizeFiverrUrl(u);
-        return normalized ? [normalized] : [];
-      });
-      if (manualGigUrls.length === 0) {
-        return NextResponse.json(
-          { error: "Paste at least one valid Fiverr gig URL" },
-          { status: 400 }
-        );
+      if (continuationTail.length > 0) {
+        manualGigUrls = continuationTail;
+      } else {
+        const raw = String(body.manualGigUrls || "");
+        manualGigUrls = parseGigUrlsFromText(raw).flatMap((u) => {
+          const normalized = normalizeFiverrUrl(u);
+          return normalized ? [normalized] : [];
+        });
+        if (manualGigUrls.length === 0) {
+          return NextResponse.json(
+            { error: "Paste at least one valid Fiverr gig URL" },
+            { status: 400 }
+          );
+        }
       }
     }
 
@@ -135,24 +162,6 @@ export async function POST(req: NextRequest) {
         { error: "Upload at least one HTML file for HTML Import mode" },
         { status: 400 }
       );
-    }
-
-    await connectDB();
-
-    let continuationTail: string[] = [];
-    let continuedFromJobId: string | undefined;
-    let appendDiscoveryAfterQueue = false;
-    const continueFromJobId = String(body.continueFromJobId || "").trim();
-
-    if (continueFromJobId && extractionMode === "live") {
-      const { tail, source } = await loadContinuationQueue(
-        user._id,
-        continueFromJobId,
-        user.role === "admin"
-      );
-      continuationTail = tail;
-      continuedFromJobId = source._id.toString();
-      appendDiscoveryAfterQueue = body.discoverNewGigsAfterQueue !== false;
     }
 
     const job = await ScrapeJob.create({

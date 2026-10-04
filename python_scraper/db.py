@@ -193,14 +193,9 @@ def previous_gig_urls_for_niche(job: dict, niche: str, current_job_id: str) -> s
             if norm:
                 seen.add(norm)
 
-    lead_query = {
-        "userId": user_id,
-        "serviceNiche": niche_match,
-    }
-    for url in leads_col().distinct("gigLink", lead_query):
-        norm = normalize_fiverr_url(url) or url
-        if norm:
-            seen.add(norm)
+    # Do NOT exclude gigs just because some leads already exist for them.
+    # A gig may still have more US/CA reviews after a lead-limit pause.
+    # Review-level dedupe (userId + dedupeKey) prevents duplicate leads.
 
     return seen
 
@@ -244,6 +239,14 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         review["reviewerName"],
         review["reviewText"],
     )
+
+    # Cross-job dedupe for the same user — reopening a partial gig must not re-save leads
+    existing = leads_col().find_one(
+        {"userId": job["userId"], "dedupeKey": dedupe_key},
+        {"_id": 1},
+    )
+    if existing:
+        return False, country, "duplicate"
 
     doc = {
         "jobId": job["_id"],

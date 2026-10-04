@@ -214,13 +214,26 @@ async def process_html_import(job: dict, job_id: str, state: dict) -> str:
     return "completed"
 
 
-async def _save_reviews(job: dict, job_id: str, gig: dict, reviews: list[dict], state: dict) -> None:
-    max_leads = job.get("maxTotalLeads") or 100
+async def _save_reviews(
+    job: dict, job_id: str, gig: dict, reviews: list[dict], state: dict
+) -> dict:
+    """
+    Save qualified reviews until maxTotalLeads.
+    Returns whether the gig still has unprocessed reviews due to the lead cap
+    (so resume can reopen this gig instead of skipping it).
+    """
+    max_leads = int(job.get("maxTotalLeads") or 100)
     total = state["us_leads"] + state["canada_leads"]
     image_mode = _review_image_mode(job)
+    saved_count = 0
+    duplicate_count = 0
+    hit_lead_limit = False
+    remaining_after_limit = 0
 
-    for review in reviews:
+    for idx, review in enumerate(reviews):
         if total >= max_leads:
+            hit_lead_limit = True
+            remaining_after_limit = len(reviews) - idx
             break
         if image_mode == "without_image":
             review = {**review, "reviewedImageLink": ""}
@@ -232,9 +245,11 @@ async def _save_reviews(job: dict, job_id: str, gig: dict, reviews: list[dict], 
             elif bucket == "canada":
                 state["canada_leads"] += 1
             total += 1
+            saved_count += 1
             rn = review.get("reviewerName", "")
             append_activity(job_id, f"Lead saved: {rn} ({country})")
         elif reason == "duplicate":
+            duplicate_count += 1
             append_activity(
                 job_id,
                 f"Duplicate skipped: {review.get('reviewerName', '')} ({country})",
@@ -245,6 +260,13 @@ async def _save_reviews(job: dict, job_id: str, gig: dict, reviews: list[dict], 
                 f"Review skipped: {review.get('reviewerName', '') or 'missing reviewer'} "
                 f"({country or 'missing country'}) reason={reason}",
             )
+
+    return {
+        "saved": saved_count,
+        "duplicates": duplicate_count,
+        "hit_lead_limit": hit_lead_limit,
+        "remaining_reviews": remaining_after_limit,
+    }
 
 
 async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int = 0) -> str:
@@ -336,15 +358,37 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                 state["gigs_scanned"] += 1
                 state["reviews_checked"] += checked
                 leads_before = state["us_leads"] + state["canada_leads"]
-                await _save_reviews(job, job_id, gig, reviews, state)
+                # Reload max leads from DB in case user raised the cap mid-run
+                fresh_limits = get_job(job_id) or current
+                job = {
+                    **job,
+                    "maxTotalLeads": fresh_limits.get("maxTotalLeads", job.get("maxTotalLeads")),
+                    "reviewImageMode": fresh_limits.get("reviewImageMode", job.get("reviewImageMode")),
+                    "targetCountries": fresh_limits.get("targetCountries", job.get("targetCountries")),
+                }
+                save_result = await _save_reviews(job, job_id, gig, reviews, state)
                 leads_after = state["us_leads"] + state["canada_leads"]
                 append_activity(
                     job_id,
-                    f"Gig {i + 1}/{len(queue)} done: seller={seller_label}; "
-                    f"{len(reviews)} qualified reviews; {checked} reviews scanned",
+                    f"Gig {i + 1}/{len(queue)}: seller={seller_label}; "
+                    f"{len(reviews)} qualified reviews; {checked} reviews scanned; "
+                    f"saved={save_result['saved']}; duplicates={save_result['duplicates']}",
                 )
                 append_activity(job_id, f"Leads saved for gig: {leads_after - leads_before}")
                 clear_failed_url(job_id, gig_url)
+
+                if save_result["hit_lead_limit"]:
+                    # Stay on this gig — more country-matching reviews remain
+                    state["resume_index"] = i
+                    stopped_reason = "lead_limit"
+                    refresh_job_counters(job_id, state)
+                    append_activity(
+                        job_id,
+                        f"Lead limit reached mid-gig. {save_result['remaining_reviews']} review(s) "
+                        f"still pending on this gig — will continue here after you raise max leads.",
+                    )
+                    break
+
                 state["resume_index"] = i + 1
                 refresh_job_counters(job_id, state)
 

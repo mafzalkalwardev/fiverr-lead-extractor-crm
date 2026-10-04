@@ -56,7 +56,7 @@ export default function NewJobPage() {
   const [loadingContinuable, setLoadingContinuable] = useState(false);
 
   const fetchContinuable = useCallback(async () => {
-    if (mode !== "live" || niche.trim().length < 2) {
+    if ((mode !== "live" && mode !== "manual_urls") || niche.trim().length < 2) {
       setContinuableJobs([]);
       return;
     }
@@ -97,7 +97,7 @@ export default function NewJobPage() {
       toast({ title: "Select at least one country" });
       return;
     }
-    if (mode === "manual_urls" && !manualUrls.trim()) {
+    if (mode === "manual_urls" && !manualUrls.trim() && !(continuePrevious && continueFromJobId)) {
       toast({ title: "Paste at least one Fiverr gig URL" });
       return;
     }
@@ -105,7 +105,7 @@ export default function NewJobPage() {
       toast({ title: "Select HTML file(s) to upload" });
       return;
     }
-    if (continuePrevious && mode === "live") {
+    if (continuePrevious && (mode === "live" || mode === "manual_urls")) {
       if (!continueFromJobId) {
         toast({ title: "Select a previous job to continue from" });
         return;
@@ -149,10 +149,10 @@ export default function NewJobPage() {
             reviewImageMode,
             ...form,
             maxGigs: mode === "manual_urls" ? Math.min(form.maxGigs, manualUrls.split(/\n/).length) : form.maxGigs,
-            ...(continuePrevious && mode === "live"
+            ...(continuePrevious && (mode === "live" || mode === "manual_urls")
               ? {
                   continueFromJobId,
-                  discoverNewGigsAfterQueue,
+                  discoverNewGigsAfterQueue: mode === "live" ? discoverNewGigsAfterQueue : false,
                 }
               : {}),
           }),
@@ -233,7 +233,7 @@ export default function NewJobPage() {
               />
             </div>
 
-            {mode === "live" && (
+            {(mode === "live" || mode === "manual_urls") && (
               <div className="space-y-3 rounded-lg border border-border/80 bg-muted/20 p-4">
                 <div className="flex items-start gap-3">
                   <History className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -241,8 +241,8 @@ export default function NewJobPage() {
                     <div>
                       <p className="font-medium text-sm">Continue from previous job</p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Pick up unprocessed gigs from an earlier run (e.g. after a month). Already-saved
-                        leads are skipped automatically; then optionally search Fiverr for new gigs.
+                        Resume unprocessed gigs (including a gig that stopped mid-way at the lead
+                        limit). Already-saved reviews are skipped — no duplicates.
                       </p>
                     </div>
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -284,15 +284,17 @@ export default function NewJobPage() {
                             ))}
                           </select>
                         </div>
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={discoverNewGigsAfterQueue}
-                            onChange={(e) => setDiscoverNewGigsAfterQueue(e.target.checked)}
-                            className="rounded border-input"
-                          />
-                          After queue finishes, search Fiverr for new gigs
-                        </label>
+                        {mode === "live" && (
+                          <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={discoverNewGigsAfterQueue}
+                              onChange={(e) => setDiscoverNewGigsAfterQueue(e.target.checked)}
+                              className="rounded border-input"
+                            />
+                            After queue finishes, search Fiverr for new gigs
+                          </label>
+                        )}
                       </>
                     )}
                   </div>

@@ -651,11 +651,33 @@ async def process_job(job: dict) -> None:
             urls = job.get("manualGigUrls") or job.get("gigQueue") or []
             queue = [normalize_fiverr_url(u) or u for u in urls if u]
             state["gig_queue"] = queue
-            append_activity(job_id, f"Manual URLs: {len(queue)} gigs")
-            update_job(
-                job_id,
-                {"discoverySource": "manual", "urlsDiscovered": len(queue), "gigQueue": queue},
-            )
+            if job.get("reextractFromStart"):
+                state["resume_index"] = 0
+                append_activity(
+                    job_id,
+                    f"Re-extract from start — {len(queue)} pasted gig(s), scraping each gig fully again",
+                )
+                update_job(
+                    job_id,
+                    {
+                        "discoverySource": "manual",
+                        "urlsDiscovered": len(queue),
+                        "gigQueue": queue,
+                        "resumeIndex": 0,
+                        "totalGigs": len(queue),
+                    },
+                )
+            else:
+                append_activity(job_id, f"Manual URLs: {len(queue)} gigs")
+                update_job(
+                    job_id,
+                    {
+                        "discoverySource": "manual",
+                        "urlsDiscovered": len(queue),
+                        "gigQueue": queue,
+                        "totalGigs": len(queue),
+                    },
+                )
             await process_gig_list(job, job_id, state)
             return
 

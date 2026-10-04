@@ -50,6 +50,8 @@ export interface IScrapeJob extends Document {
   continuedFromJobId?: Types.ObjectId;
   /** After pre-seeded queue finishes, run Fiverr search for additional gigs */
   appendDiscoveryAfterQueue?: boolean;
+  /** Paste Gig Links: re-scrape every pasted gig from the first review (include results in this job) */
+  reextractFromStart?: boolean;
   manualGigUrls: string[];
   htmlFiles: { filename: string; gigUrl: string; storedPath: string }[];
   verificationMessage: string;
@@ -125,6 +127,7 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     resumeIndex: { type: Number, default: 0 },
     continuedFromJobId: { type: Schema.Types.ObjectId, ref: "ScrapeJob", required: false },
     appendDiscoveryAfterQueue: { type: Boolean, default: false },
+    reextractFromStart: { type: Boolean, default: false },
     manualGigUrls: { type: [String], default: [] },
     htmlFiles: {
       type: [

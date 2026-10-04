@@ -120,9 +120,13 @@ export async function POST(req: NextRequest) {
     let continuationTail: string[] = [];
     let continuedFromJobId: string | undefined;
     let appendDiscoveryAfterQueue = false;
+    const reextractFromStart =
+      extractionMode === "manual_urls" &&
+      (body.reextractFromStart === true || body.reextractFromStart === "true");
     const continueFromJobId = String(body.continueFromJobId || "").trim();
 
     if (
+      !reextractFromStart &&
       continueFromJobId &&
       (extractionMode === "live" || extractionMode === "manual_urls")
     ) {
@@ -140,7 +144,7 @@ export async function POST(req: NextRequest) {
 
     let manualGigUrls: string[] = [];
     if (extractionMode === "manual_urls") {
-      if (continuationTail.length > 0) {
+      if (continuationTail.length > 0 && !reextractFromStart) {
         manualGigUrls = continuationTail;
       } else {
         const raw = String(body.manualGigUrls || "");
@@ -181,12 +185,18 @@ export async function POST(req: NextRequest) {
       discoverySource: continuationTail.length ? "cached_queue" : "",
       continuedFromJobId: continuedFromJobId || undefined,
       appendDiscoveryAfterQueue,
+      reextractFromStart,
       errorLog: [],
     });
 
     const jobId = job._id.toString();
 
-    if (continuationTail.length) {
+    if (reextractFromStart) {
+      await appendJobLog(
+        jobId,
+        `Re-extract from start enabled — ${manualGigUrls.length} pasted gig(s) will be scraped fully again`
+      );
+    } else if (continuationTail.length) {
       await appendJobLog(
         jobId,
         `Continuing ${continuationTail.length} unprocessed gig(s) from job ${continuedFromJobId}${

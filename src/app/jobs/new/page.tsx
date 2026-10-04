@@ -52,6 +52,7 @@ export default function NewJobPage() {
   const [continuePrevious, setContinuePrevious] = useState(false);
   const [continueFromJobId, setContinueFromJobId] = useState("");
   const [discoverNewGigsAfterQueue, setDiscoverNewGigsAfterQueue] = useState(true);
+  const [reextractFromStart, setReextractFromStart] = useState(false);
   const [continuableJobs, setContinuableJobs] = useState<ContinuableJob[]>([]);
   const [loadingContinuable, setLoadingContinuable] = useState(false);
 
@@ -97,7 +98,11 @@ export default function NewJobPage() {
       toast({ title: "Select at least one country" });
       return;
     }
-    if (mode === "manual_urls" && !manualUrls.trim() && !(continuePrevious && continueFromJobId)) {
+    if (
+      mode === "manual_urls" &&
+      !manualUrls.trim() &&
+      !(continuePrevious && continueFromJobId && !reextractFromStart)
+    ) {
       toast({ title: "Paste at least one Fiverr gig URL" });
       return;
     }
@@ -149,12 +154,15 @@ export default function NewJobPage() {
             reviewImageMode,
             ...form,
             maxGigs: mode === "manual_urls" ? Math.min(form.maxGigs, manualUrls.split(/\n/).length) : form.maxGigs,
-            ...(continuePrevious && (mode === "live" || mode === "manual_urls")
+            ...(continuePrevious &&
+            !reextractFromStart &&
+            (mode === "live" || mode === "manual_urls")
               ? {
                   continueFromJobId,
                   discoverNewGigsAfterQueue: mode === "live" ? discoverNewGigsAfterQueue : false,
                 }
               : {}),
+            ...(mode === "manual_urls" ? { reextractFromStart } : {}),
           }),
         });
       }
@@ -245,13 +253,20 @@ export default function NewJobPage() {
                         limit). Already-saved reviews are skipped — no duplicates.
                       </p>
                     </div>
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <label
+                      className={cn(
+                        "flex items-center gap-2 text-sm cursor-pointer",
+                        reextractFromStart && mode === "manual_urls" && "opacity-50"
+                      )}
+                    >
                       <input
                         type="checkbox"
                         checked={continuePrevious}
+                        disabled={reextractFromStart && mode === "manual_urls"}
                         onChange={(e) => {
                           setContinuePrevious(e.target.checked);
                           if (!e.target.checked) setContinueFromJobId("");
+                          if (e.target.checked) setReextractFromStart(false);
                         }}
                         className="rounded border-input"
                       />
@@ -345,18 +360,43 @@ export default function NewJobPage() {
             </div>
 
             {mode === "manual_urls" && (
-              <div className="space-y-2">
-                <Label>Paste Fiverr gig URLs (one per line)</Label>
-                <textarea
-                  className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="https://www.fiverr.com/seller/gig-slug"
-                  value={manualUrls}
-                  onChange={(e) => setManualUrls(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  On Fiverr.com, open any gig → copy the address bar link → paste one URL per line.
-                  No technical skills needed.
-                </p>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label>Paste Fiverr gig URLs (one per line)</Label>
+                  <textarea
+                    className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="https://www.fiverr.com/seller/gig-slug"
+                    value={manualUrls}
+                    onChange={(e) => setManualUrls(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    On Fiverr.com, open any gig → copy the address bar link → paste one URL per line.
+                    No technical skills needed.
+                  </p>
+                </div>
+                <label className="flex items-start gap-2 rounded-lg border border-border/80 bg-muted/20 p-3 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 rounded border-input"
+                    checked={reextractFromStart}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setReextractFromStart(on);
+                      if (on) {
+                        setContinuePrevious(false);
+                        setContinueFromJobId("");
+                      }
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium">Extract again from start</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Re-open each pasted gig and extract all matching reviews from the beginning.
+                      Results are attached to this job (existing duplicate reviews are refreshed, not
+                      double-counted as new unique rows).
+                    </span>
+                  </span>
+                </label>
               </div>
             )}
 

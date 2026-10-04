@@ -288,6 +288,7 @@ export async function processGigList(
             niche,
             gig,
             review: reviewForSave,
+            reextractFromStart: Boolean(job.reextractFromStart),
           },
           job.targetCountries
         );

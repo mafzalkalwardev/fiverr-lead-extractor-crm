@@ -224,14 +224,27 @@ export async function processScrapeJob(jobId: string): Promise<void> {
 
       // Ensure GigProgress records exist, then find where to resume
       await ensureGigProgressRecords(jobId, normalized);
-      const stuckCount = await resetProcessingGigs(jobId);
-      if (stuckCount > 0) {
+      let startIndex = 0;
+      if (job.reextractFromStart) {
+        await GigProgress.updateMany(
+          { jobId },
+          { $set: { status: "pending", lastError: "", reviewsParsed: 0, leadsFound: 0 } }
+        );
+        startIndex = 0;
         await appendJobLog(
           jobId,
-          `Reset ${stuckCount} stuck gig(s) to pending for retry`
+          `Re-extract from start — ${normalized.length} pasted gig(s) will be scraped fully again`
         );
+      } else {
+        const stuckCount = await resetProcessingGigs(jobId);
+        if (stuckCount > 0) {
+          await appendJobLog(
+            jobId,
+            `Reset ${stuckCount} stuck gig(s) to pending for retry`
+          );
+        }
+        startIndex = await findResumeIndex(jobId, normalized.length);
       }
-      const startIndex = await findResumeIndex(jobId, normalized.length);
 
       await ScrapeJob.findByIdAndUpdate(jobId, {
         status: "extracting_reviews",
@@ -251,12 +264,12 @@ export async function processScrapeJob(jobId: string): Promise<void> {
         return;
       }
 
-      if (startIndex > 0) {
+      if (!job.reextractFromStart && startIndex > 0) {
         await appendJobLog(
           jobId,
           `Resumed from gig ${startIndex + 1}/${normalized.length} (skipping ${startIndex} already-completed gigs)`
         );
-      } else {
+      } else if (!job.reextractFromStart) {
         await appendJobLog(
           jobId,
           `Manual URLs accepted: ${normalized.length} real Fiverr gigs`

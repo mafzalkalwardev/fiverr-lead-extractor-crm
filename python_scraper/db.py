@@ -240,14 +240,6 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         review["reviewText"],
     )
 
-    # Cross-job dedupe for the same user — reopening a partial gig must not re-save leads
-    existing = leads_col().find_one(
-        {"userId": job["userId"], "dedupeKey": dedupe_key},
-        {"_id": 1},
-    )
-    if existing:
-        return False, country, "duplicate"
-
     doc = {
         "jobId": job["_id"],
         "userId": job["userId"],
@@ -266,6 +258,39 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         "scrapedAt": now_utc(),
         "dedupeKey": dedupe_key,
     }
+
+    existing = leads_col().find_one(
+        {"userId": job["userId"], "dedupeKey": dedupe_key},
+    )
+    if existing:
+        # Paste-links "extract again from start": refresh lead onto this job so results appear
+        if job.get("reextractFromStart"):
+            if existing.get("jobId") == job["_id"]:
+                return False, country, "duplicate"
+            leads_col().update_one(
+                {"_id": existing["_id"]},
+                {
+                    "$set": {
+                        "jobId": job["_id"],
+                        "sellerName": doc["sellerName"],
+                        "sellerUsername": doc["sellerUsername"],
+                        "gigLink": doc["gigLink"],
+                        "gigTitle": doc["gigTitle"],
+                        "reviewerName": doc["reviewerName"],
+                        "country": doc["country"],
+                        "review": doc["review"],
+                        "reviewRating": doc["reviewRating"],
+                        "reviewDate": doc["reviewDate"],
+                        "reviewedImageLink": doc["reviewedImageLink"],
+                        "mainGigImage": doc["mainGigImage"],
+                        "serviceNiche": doc["serviceNiche"],
+                        "scrapedAt": doc["scrapedAt"],
+                    }
+                },
+            )
+            return True, country, "saved"
+        # Cross-job dedupe — resume/continue must not create duplicate rows
+        return False, country, "duplicate"
 
     try:
         leads_col().insert_one(doc)

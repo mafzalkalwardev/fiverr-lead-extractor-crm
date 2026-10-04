@@ -38,6 +38,8 @@ export interface LeadInput {
   niche: string;
   gig: GigData;
   review: ReviewData;
+  /** Paste Gig Links: refresh existing leads onto this job instead of skipping */
+  reextractFromStart?: boolean;
 }
 
 export type SaveLeadResult = {
@@ -81,36 +83,63 @@ export async function saveLeadIfQualified(
     input.review.reviewText.trim()
   );
 
-  // Cross-job dedupe for the same user — resume/continue must not re-save leads
+  const leadFields = {
+    jobId: input.jobId,
+    userId: input.userId,
+    sellerName,
+    sellerUsername,
+    gigLink: input.gig.gigUrl.trim(),
+    gigTitle: input.gig.gigTitle.trim(),
+    reviewerName: reviewerName.trim(),
+    country,
+    review: input.review.reviewText.trim(),
+    reviewRating: input.review.reviewRating,
+    reviewDate: input.review.reviewDate,
+    reviewedImageLink: (input.review.reviewedImageLink || "").trim(),
+    mainGigImage: (input.gig.mainGigImage || "").trim(),
+    serviceNiche: input.niche,
+    scrapedAt: new Date(),
+    dedupeKey,
+  };
+
   const existing = await Lead.findOne({
     userId: input.userId,
     dedupeKey,
-  })
-    .select("_id")
-    .lean();
+  }).lean();
+
   if (existing) {
+    if (input.reextractFromStart) {
+      if (String(existing.jobId) === String(input.jobId)) {
+        return { saved: false, country, reason: "duplicate" };
+      }
+      await Lead.updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            jobId: input.jobId,
+            sellerName: leadFields.sellerName,
+            sellerUsername: leadFields.sellerUsername,
+            gigLink: leadFields.gigLink,
+            gigTitle: leadFields.gigTitle,
+            reviewerName: leadFields.reviewerName,
+            country: leadFields.country,
+            review: leadFields.review,
+            reviewRating: leadFields.reviewRating,
+            reviewDate: leadFields.reviewDate,
+            reviewedImageLink: leadFields.reviewedImageLink,
+            mainGigImage: leadFields.mainGigImage,
+            serviceNiche: leadFields.serviceNiche,
+            scrapedAt: leadFields.scrapedAt,
+          },
+        }
+      );
+      return { saved: true, country, reason: "saved" };
+    }
     return { saved: false, country, reason: "duplicate" };
   }
 
   try {
-    await Lead.create({
-      jobId: input.jobId,
-      userId: input.userId,
-      sellerName,
-      sellerUsername,
-      gigLink: input.gig.gigUrl.trim(),
-      gigTitle: input.gig.gigTitle.trim(),
-      reviewerName: reviewerName.trim(),
-      country,
-      review: input.review.reviewText.trim(),
-      reviewRating: input.review.reviewRating,
-      reviewDate: input.review.reviewDate,
-      reviewedImageLink: (input.review.reviewedImageLink || "").trim(),
-      mainGigImage: (input.gig.mainGigImage || "").trim(),
-      serviceNiche: input.niche,
-      scrapedAt: new Date(),
-      dedupeKey,
-    });
+    await Lead.create(leadFields);
     return { saved: true, country, reason: "saved" };
   } catch (err) {
     if ((err as { code?: number }).code === 11000) {

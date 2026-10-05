@@ -54,11 +54,22 @@ GIG_IMAGE_HINT = re.compile(
 )
 
 
-def _normalize_target_country(value: str) -> str:
+def _normalize_target_country(value: str, allow_short_code: bool = False) -> str:
     text = clean_text(value)
-    if re.search(r"united states|usa|u\.s\.", text, re.I):
+    text = re.sub(r"\bflag\s+of\b", " ", text, flags=re.I)
+    text = re.sub(r"\bflag\b", " ", text, flags=re.I)
+    text = re.sub(r"\bcountry\b", " ", text, flags=re.I)
+    text = re.sub(r"^from\s+", "", text, flags=re.I)
+    text = clean_text(text)
+    if not text:
+        return ""
+    if re.search(r"\b(united states|usa|u\.s\.a\.|u\.s\.)\b", text, re.I):
         return "United States"
     if re.search(r"\bcanada\b", text, re.I):
+        return "Canada"
+    if allow_short_code and re.match(r"^(us|u\.s\.|usa|u\.s\.a\.)$", text, re.I):
+        return "United States"
+    if allow_short_code and re.match(r"^ca$", text, re.I):
         return "Canada"
     return ""
 
@@ -363,26 +374,53 @@ async def _card_text(card: Locator) -> str:
 
 
 async def _find_country(card: Locator, card_text: str) -> str:
-    for sel in ('[class*="country" i]', '[class*="location" i]', '[data-testid*="country" i]'):
-        loc = card.locator(sel)
-        for i in range(min(await loc.count(), 10)):
-            t = clean_text(await loc.nth(i).inner_text(timeout=800))
-            c = _normalize_target_country(t)
-            if c:
-                return c
-            alt = await loc.nth(i).get_attribute("aria-label") or ""
-            c = _normalize_target_country(alt)
+    """
+    Fiverr usually shows country as plain text under the username
+    (e.g. "United States") or as a flag alt/title — not "from United States".
+    """
+    # 1) Flag / img / aria attrs (often "United States" or "Flag of United States")
+    attr_nodes = card.locator("img, [aria-label], [title], [data-testid*='country' i]")
+    for i in range(min(await attr_nodes.count(), 60)):
+        node = attr_nodes.nth(i)
+        for attr in ("alt", "aria-label", "title", "data-country", "data-testid"):
+            raw = await node.get_attribute(attr) or ""
+            c = _normalize_target_country(raw, allow_short_code=True)
             if c:
                 return c
 
+    # 2) Dedicated country / location / flag nodes
+    for sel in (
+        '[class*="country" i]',
+        '[class*="location" i]',
+        '[class*="flag" i]',
+        '[data-testid*="country" i]',
+        '[data-testid*="location" i]',
+    ):
+        loc = card.locator(sel)
+        for i in range(min(await loc.count(), 12)):
+            t = clean_text(await loc.nth(i).inner_text(timeout=800))
+            c = _normalize_target_country(t, allow_short_code=True)
+            if c:
+                return c
+            for attr in ("aria-label", "title", "alt"):
+                alt = await loc.nth(i).get_attribute(attr) or ""
+                c = _normalize_target_country(alt, allow_short_code=True)
+                if c:
+                    return c
+
+    # 3) Phrase forms
     m = re.search(
-        r"\b(?:from|located in)\s+(United States|USA|U\.S\.|Canada)\b",
+        r"\b(?:from|located in|based in)\s+(United States|U\.S\.A\.|USA|U\.S\.|Canada|CA)\b",
         card_text,
         re.I,
     )
     if m:
-        return _normalize_target_country(m.group(1))
-    return ""
+        c = _normalize_target_country(m.group(1), allow_short_code=True)
+        if c:
+            return c
+
+    # 4) Bare country name anywhere in the card text (common Fiverr layout)
+    return _normalize_target_country(card_text, allow_short_code=False)
 
 
 def _parse_rating(text: str) -> float:
@@ -592,6 +630,9 @@ def _strip_image_url(value: str) -> str:
 def _score_review_image(url: str, reject_urls: set[str] | None = None) -> int:
     if not url or not url.startswith("http"):
         return 0
+    # Ignore tiny placeholders / data URIs (already excluded by http check)
+    if re.search(r"data:image|placeholder|1x1|pixel|blank\.", url, re.I):
+        return 0
     if reject_urls and _strip_image_url(url) in reject_urls:
         return 0
     if BAD_REVIEW_IMAGE.search(url):
@@ -600,12 +641,11 @@ def _score_review_image(url: str, reject_urls: set[str] | None = None) -> int:
         return 0
     if REVIEW_IMAGE_HINT.search(url):
         return 4
-    if (
-        GENERIC_FIVERR_IMAGE_HOST.search(url)
-        and re.search(r"\.(jpg|jpeg|png|webp)", url, re.I)
-        and not GIG_IMAGE_HINT.search(url)
-    ):
-        return 2
+    # Cloudinary/fiverr-res often omit file extensions — still valid delivery thumbnails
+    if GENERIC_FIVERR_IMAGE_HOST.search(url) and not GIG_IMAGE_HINT.search(url):
+        if re.search(r"\.(jpg|jpeg|png|webp)(\?|$)|/image/upload|/images/", url, re.I):
+            return 2
+        return 1
     return 0
 
 
@@ -619,6 +659,38 @@ async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = N
 
     best = ""
     best_score = 0
+
+    # Prefer resolved currentSrc (lazy-loaded) via a single evaluate
+    try:
+        urls = await card.evaluate(
+            """(el) => {
+              const out = [];
+              for (const img of el.querySelectorAll('img')) {
+                for (const u of [img.currentSrc, img.src, img.getAttribute('data-src'),
+                                 img.getAttribute('data-lazy-src'), img.getAttribute('data-original')]) {
+                  if (u && typeof u === 'string' && u.startsWith('http')) out.push(u);
+                }
+                const ss = img.getAttribute('srcset') || '';
+                if (ss) {
+                  const first = ss.split(',')[0].trim().split(/\\s+/)[0];
+                  if (first) out.push(first.startsWith('http') ? first : (first.startsWith('//') ? 'https:' + first : first));
+                }
+              }
+              for (const a of el.querySelectorAll('a[href]')) {
+                const h = a.getAttribute('href') || '';
+                if (/\\.(jpg|jpeg|png|webp)|cloudinary|fiverr-res|attachment|delivery/i.test(h)) out.push(h);
+              }
+              return out;
+            }"""
+        )
+        for src in urls or []:
+            full = absolutize_url(src)
+            score = _score_review_image(full, reject_urls)
+            if score > best_score:
+                best_score = score
+                best = full
+    except Exception:
+        pass
 
     imgs = card.locator("img")
     for i in range(min(await imgs.count(), 30)):
@@ -659,7 +731,9 @@ async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = N
             best_score = score
             best = full
 
-    return best if best_score > 0 else ""
+    if best and best_score > 0:
+        return best
+    return ""
 
 
 def _country_mention_count(text: str) -> int:
@@ -962,8 +1036,10 @@ async def extract_reviews(
             country = await _find_country(card, card_text)
             norm = normalize_country(country)
             if norm not in ("United States", "Canada"):
-                if country:
-                    append_activity(job_id, f"Review skipped: country={country}")
+                append_activity(
+                    job_id,
+                    f"Review skipped: country={country or 'missing/undetected'}",
+                )
                 continue
 
             reviewer = await _reviewer_before_country_dom(card)

@@ -346,13 +346,8 @@ def is_valid_review_image(url: str) -> bool:
         return False
     if DELIVERY_IMAGE.search(url):
         return True
-    if (
-        GENERIC_FIVERR_IMAGE_HOST.search(url)
-        and re.search(r"\.(jpg|jpeg|png|webp)(\?|$)", url, re.I)
-        and not GIG_IMAGE_MARKER.search(url)
-    ):
-        return True
-    return False
+    # Cloudinary/fiverr-res thumbs (often no file extension) inside review cards
+    return bool(GENERIC_FIVERR_IMAGE_HOST.search(url) and not GIG_IMAGE_MARKER.search(url))
 
 
 def is_valid_real_lead(gig: dict, review: dict) -> bool:

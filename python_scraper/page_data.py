@@ -148,10 +148,31 @@ def _pick_rating(obj: dict[str, Any]) -> float:
 
 
 def _pick_country(obj: dict[str, Any]) -> str:
-    for key in ("country", "countryCode", "location", "reviewerCountry"):
-        country = normalize_country(clean_text(obj.get(key)))
+    for key in ("country", "countryCode", "country_code", "location", "reviewerCountry", "buyerCountry"):
+        value = obj.get(key)
+        if isinstance(value, dict):
+            for nested_key in ("name", "country", "countryName", "code", "countryCode", "label"):
+                raw = clean_text(value.get(nested_key))
+                if not raw:
+                    continue
+                country = normalize_country(raw)
+                if country in ("United States", "Canada"):
+                    return country
+                if re.match(r"^(us|usa|u\.s\.a?)$", raw, re.I):
+                    return "United States"
+                if re.match(r"^(ca|can)$", raw, re.I):
+                    return "Canada"
+            continue
+        raw = clean_text(value)
+        if not raw:
+            continue
+        country = normalize_country(raw)
         if country in ("United States", "Canada"):
             return country
+        if re.match(r"^(us|usa|u\.s\.a?)$", raw, re.I):
+            return "United States"
+        if re.match(r"^(ca|can)$", raw, re.I):
+            return "Canada"
 
     for nested_key in ("buyer", "reviewer", "author", "user"):
         nested = obj.get(nested_key)

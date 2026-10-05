@@ -24,12 +24,15 @@ from verification import assert_page_accessible
 # Avoid gig-page carousel / description expanders (causes timeouts & wrong clicks)
 REVIEW_SECTION = (
     '[data-testid="reviews-tab-panel"], [data-testid*="reviews-tab" i], '
-    '#reviews-tab, section:has([data-testid*="review-card" i]), '
-    '[class*="reviews-package" i], [class*="reviews-list" i]'
+    '[data-testid*="reviews" i], #reviews-tab, #reviews, '
+    'section:has([data-testid*="review-card" i]), '
+    '[class*="reviews-package" i], [class*="reviews-list" i], '
+    '[class*="reviews-component" i], [class*="gig-reviews" i]'
 )
 REVIEW_ROOT = '[data-testid="reviews-tab-panel"], [data-testid*="review-card" i]'
 REVIEW_CARD_SELECTORS = [
     '[data-testid*="review-card" i]',
+    '[class*="review-item-component-wrapper" i]',
     '[class*="review-card" i]',
     '[class*="review-item" i]',
     "article[class*='review' i]",
@@ -169,54 +172,187 @@ async def _close_open_dialogs(page: Page) -> None:
 
 
 async def click_next_review_page(page: Page, current_page: int) -> bool:
-    """Click the next reviews pagination control inside the review section."""
-    scope = page.locator(REVIEW_SECTION).first
-    if not await scope.count():
-        return False  # No review section found — never fall back to body-level pagination
+    """
+    Click the next reviews pagination control.
 
-    candidates = [
-        scope.get_by_role("button", name=re.compile(r"^(next|next page|>)$", re.I)),
-        scope.get_by_role("link", name=re.compile(r"^(next|next page|>)$", re.I)),
-        scope.locator('[aria-label*="next" i]'),
-        scope.locator(f'button:has-text("{current_page + 1}")'),
-        scope.locator(f'a:has-text("{current_page + 1}")'),
-    ]
+    Fiverr puts page numbers / Next *below* the review list — often a sibling of
+    the cards, not inside each review-card root. Search the whole document and
+    prefer controls sitting just under the last review card.
+    """
+    target = current_page + 1
 
-    for loc in candidates:
-        count = min(await loc.count(), 8)
-        for i in range(count):
-            btn = loc.nth(i)
-            try:
-                label = clean_text(
-                    await btn.inner_text(timeout=600)
-                    or await btn.get_attribute("aria-label")
-                    or ""
-                )
-            except Exception:
-                label = clean_text(await btn.get_attribute("aria-label") or "")
-            marker_parts = []
-            for attr in ("class", "aria-disabled", "disabled"):
-                marker_parts.append(clean_text(await btn.get_attribute(attr) or ""))
-            marker = " ".join(marker_parts)
-            if re.search(r"disabled|true", marker, re.I):
-                continue
-            if label and re.search(r"previous|prev", label, re.I):
-                continue
-            try:
-                if not await btn.is_visible(timeout=500):
+    # Bring pagination into view (it sits under the current review cards)
+    try:
+        await page.evaluate(
+            """() => {
+              const cards = document.querySelectorAll(
+                '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+              );
+              if (cards.length) {
+                cards[cards.length - 1].scrollIntoView({ block: 'center', behavior: 'instant' });
+              }
+            }"""
+        )
+        await asyncio.sleep(0.35)
+        await page.mouse.wheel(0, 700)
+        await asyncio.sleep(0.25)
+    except Exception:
+        pass
+
+    try:
+        clicked = await page.evaluate(
+            """(targetPage) => {
+              const isVisible = (el) => {
+                if (!el) return false;
+                const r = el.getBoundingClientRect();
+                const st = window.getComputedStyle(el);
+                return r.width > 0 && r.height > 0
+                  && st.visibility !== 'hidden' && st.display !== 'none'
+                  && st.opacity !== '0';
+              };
+              const disabled = (el) =>
+                el.hasAttribute('disabled') ||
+                el.getAttribute('aria-disabled') === 'true' ||
+                /disabled/i.test(el.className || '') ||
+                /disabled/i.test(el.parentElement?.className || '');
+
+              const cards = Array.from(document.querySelectorAll(
+                '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+              )).filter(isVisible);
+              let anchorY = window.scrollY + window.innerHeight * 0.55;
+              if (cards.length) {
+                const last = cards[cards.length - 1].getBoundingClientRect();
+                anchorY = last.bottom;
+              }
+
+              const nodes = document.querySelectorAll(
+                'button, a, [role="button"], [role="link"], li, span, div[class*="page" i]'
+              );
+              const candidates = [];
+              for (const el of nodes) {
+                if (!isVisible(el) || disabled(el)) continue;
+                // Skip controls nested inside a review card body
+                if (el.closest('[data-testid*="review-card" i], [class*="review-item-component-wrapper" i]')) {
+                  continue;
+                }
+                const label = ((el.getAttribute('aria-label') || el.innerText || '') + '')
+                  .replace(/\\s+/g, ' ')
+                  .trim();
+                if (!label || label.length > 28) continue;
+                if (/prev|previous|back/i.test(label)) continue;
+                const isNext = /^(next|next page|>|›|»|→)$/i.test(label)
+                  || /go to next/i.test(label);
+                const isNum = new RegExp('^' + targetPage + '$').test(label);
+                if (!isNext && !isNum) continue;
+                const y = el.getBoundingClientRect().top;
+                // Prefer controls near / just below the reviews list
+                const dist = Math.abs(y - anchorY);
+                candidates.push({ el, y, dist, isNext, isNum });
+              }
+
+              if (!candidates.length) return false;
+              candidates.sort((a, b) => {
+                if (a.isNum !== b.isNum) return a.isNum ? -1 : 1;
+                if (a.dist !== b.dist) return a.dist - b.dist;
+                return a.y - b.y;
+              });
+              const pick = candidates[0].el;
+              pick.scrollIntoView({ block: 'center', behavior: 'instant' });
+              pick.click();
+              return true;
+            }""",
+            target,
+        )
+        if clicked:
+            await asyncio.sleep(1.5)
+            await page.mouse.wheel(0, 400)
+            await asyncio.sleep(0.35)
+            return True
+    except Exception:
+        pass
+
+    # Fallback: Playwright locators (body-wide — pagination is often outside REVIEW_SECTION)
+    scopes = [page.locator("body")]
+    section = page.locator(REVIEW_SECTION).first
+    if await section.count():
+        scopes.insert(0, section)
+
+    for scope in scopes:
+        candidates = [
+            scope.get_by_role("button", name=re.compile(rf"^{target}$")),
+            scope.get_by_role("link", name=re.compile(rf"^{target}$")),
+            scope.get_by_role("button", name=re.compile(r"^(next|next page|>)$", re.I)),
+            scope.get_by_role("link", name=re.compile(r"^(next|next page|>)$", re.I)),
+            scope.locator('[aria-label*="next" i]:not([aria-label*="previous" i])'),
+            scope.locator(f'nav button:has-text("{target}")'),
+            scope.locator(f'nav a:has-text("{target}")'),
+            scope.locator(f'[class*="pagination" i] button:has-text("{target}")'),
+            scope.locator(f'[class*="pagination" i] a:has-text("{target}")'),
+            scope.locator(f'button:has-text("{target}")'),
+            scope.locator(f'a:has-text("{target}")'),
+        ]
+        for loc in candidates:
+            count = min(await loc.count(), 16)
+            for i in range(count):
+                btn = loc.nth(i)
+                try:
+                    if not await btn.is_visible(timeout=400):
+                        continue
+                    aria_dis = (await btn.get_attribute("aria-disabled") or "").lower()
+                    if aria_dis == "true" or await btn.get_attribute("disabled") is not None:
+                        continue
+                    label = clean_text(
+                        await btn.inner_text(timeout=500)
+                        or await btn.get_attribute("aria-label")
+                        or ""
+                    )
+                    if re.search(r"previous|prev", label, re.I):
+                        continue
+                    # Ignore gig-carousel / unrelated numbered controls far from reviews
+                    if label == str(target) or re.match(r"^(next|next page|>|›)$", label, re.I):
+                        pass
+                    elif not re.search(r"next", label, re.I):
+                        continue
+                    await btn.scroll_into_view_if_needed(timeout=2000)
+                    await btn.click(timeout=3000)
+                    await asyncio.sleep(1.5)
+                    await page.mouse.wheel(0, 400)
+                    return True
+                except Exception:
                     continue
-                if not await btn.is_enabled(timeout=500):
-                    continue
-            except Exception:
-                continue
-            try:
-                await btn.click(timeout=3000)
-                await asyncio.sleep(1.1)
-                await page.mouse.wheel(0, 400)
-                return True
-            except Exception:
-                continue
     return False
+
+
+async def scroll_load_more_reviews(page: Page, max_rounds: int = 40) -> int:
+    """
+    Fallback when pagination buttons are missing: scroll the reviews area so
+    Fiverr lazy-loads additional review cards into the DOM.
+    """
+    rounds = 0
+    last_count = 0
+    stagnant = 0
+    for _ in range(max_rounds):
+        try:
+            count = await page.evaluate(
+                """() => document.querySelectorAll(
+                  '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+                ).length"""
+            )
+        except Exception:
+            count = 0
+        if count <= last_count:
+            stagnant += 1
+            if stagnant >= 3:
+                break
+        else:
+            stagnant = 0
+            last_count = count
+            rounds += 1
+        await page.mouse.wheel(0, 1400)
+        await asyncio.sleep(0.55)
+        # Keep trying show-more while scrolling
+        await click_load_more(page, max_clicks=2)
+    return rounds
 
 
 async def _card_text(card: Locator) -> str:
@@ -563,7 +699,7 @@ async def _collect_review_cards(page: Page) -> list[tuple[Locator, str]]:
 
     for selector_index, sel in enumerate(REVIEW_CARD_SELECTORS):
         loc = page.locator(sel)
-        for i in range(min(await loc.count(), 200)):
+        for i in range(min(await loc.count(), 500)):
             card = loc.nth(i)
             text = await _card_text(card)
             if len(text) < 40 or len(text) > 4500:
@@ -793,7 +929,10 @@ async def extract_reviews(
             job_id,
             f"Review page {review_page}: {len(candidates)} review block(s) found",
         )
-        signature = "|".join(clean_text(text)[:120].lower() for _card, text in candidates[:10])
+        # Include card count so scroll-expanded DOM does not look like a "repeat"
+        signature = f"{len(candidates)}|" + "|".join(
+            clean_text(text)[:120].lower() for _card, text in candidates[:10]
+        )
         if signature and signature in seen_page_signatures:
             append_activity(
                 job_id,
@@ -899,10 +1038,49 @@ async def extract_reviews(
         if not unlimited and len(parsed) >= max_reviews:
             break
         await _close_open_dialogs(page)
-        if not await click_next_review_page(page, review_page):
-            break
-        review_page += 1
-        await scroll_to_reviews(page)
+
+        advanced = await click_next_review_page(page, review_page)
+        if advanced:
+            review_page += 1
+            await scroll_to_reviews(page)
+            continue
+
+        # Retry once after scrolling deeper — pagination can render late
+        if review_page <= 2:
+            try:
+                await page.mouse.wheel(0, 1200)
+                await asyncio.sleep(0.6)
+            except Exception:
+                pass
+            advanced = await click_next_review_page(page, review_page)
+            if advanced:
+                review_page += 1
+                await scroll_to_reviews(page)
+                continue
+
+        # Last resort: infinite-scroll / lazy-load gigs (no page buttons)
+        if review_page == 1:
+            before_count = len(candidates)
+            scroll_rounds = await scroll_load_more_reviews(
+                page, max_rounds=config.REVIEW_SCROLL_LOAD_MAX
+            )
+            after_cards = await _collect_review_cards(page)
+            if scroll_rounds > 0 and len(after_cards) > before_count:
+                append_activity(
+                    job_id,
+                    f"No pagination controls found — scroll-loaded more reviews "
+                    f"({scroll_rounds} rounds, {before_count}→{len(after_cards)} cards)",
+                )
+                # Drop prior signature so the expanded DOM is re-parsed
+                seen_page_signatures.clear()
+                review_page += 1
+                continue
+
+        append_activity(
+            job_id,
+            f"Review pagination ended after page {review_page} (no next page control)",
+        )
+        break
 
     if not unlimited:
         parsed = parsed[:max_reviews]

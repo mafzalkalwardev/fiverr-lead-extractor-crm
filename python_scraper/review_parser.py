@@ -81,6 +81,86 @@ def _image_from_srcset(srcset: str) -> str:
     return absolutize_url(first)
 
 
+async def open_all_reviews_panel(page: Page) -> bool:
+    """
+    Modern Fiverr gig pages only show a review preview.
+    Full list + pagination live behind 'See all reviews' / '(N reviews)'.
+    """
+    # Already in a reviews dialog that has multiple review cards?
+    try:
+        already = await page.evaluate(
+            """() => {
+              for (const d of document.querySelectorAll('[role="dialog"]')) {
+                const r = d.getBoundingClientRect();
+                const st = window.getComputedStyle(d);
+                if (r.width < 120 || r.height < 120 || st.display === 'none' || st.visibility === 'hidden') continue;
+                const cards = d.querySelectorAll(
+                  '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+                ).length;
+                if (cards >= 3) return true;
+              }
+              return false;
+            }"""
+        )
+        if already:
+            return True
+    except Exception:
+        pass
+
+    # JS click is more reliable than Playwright role matching on Fiverr
+    try:
+        clicked = await page.evaluate(
+            """() => {
+              const isVisible = (el) => {
+                const r = el.getBoundingClientRect();
+                const st = window.getComputedStyle(el);
+                return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none';
+              };
+              const scored = [];
+              for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+                if (!isVisible(el)) continue;
+                const label = ((el.innerText || el.getAttribute('aria-label') || '') + '')
+                  .replace(/\\s+/g, ' ').trim();
+                if (!label) continue;
+                const cls = (el.className || '').toString();
+                if (/expand-description|gig-description|package/i.test(cls)) continue;
+                let score = 0;
+                if (/^see all reviews$/i.test(label)) score = 100;
+                else if (/see all reviews/i.test(label)) score = 80;
+                else if (/^\\(?\\d[\\d,]*\\s*reviews?\\)?$/i.test(label)) score = 40;
+                if (!score) continue;
+                scored.push({ el, score, y: el.getBoundingClientRect().top });
+              }
+              if (!scored.length) return false;
+              scored.sort((a, b) => b.score - a.score || Math.abs(a.y - 300) - Math.abs(b.y - 300));
+              scored[0].el.scrollIntoView({ block: 'center', behavior: 'instant' });
+              scored[0].el.click();
+              return scored[0].score >= 80 ? 'see_all' : 'count';
+            }"""
+        )
+        if clicked:
+            await asyncio.sleep(1.8)
+            return True
+    except Exception:
+        pass
+
+    # Playwright fallback
+    for loc in (
+        page.locator('button:has-text("See all reviews")'),
+        page.locator('a:has-text("See all reviews")'),
+    ):
+        try:
+            btn = loc.first
+            if await btn.count() and await btn.is_visible(timeout=800):
+                await btn.scroll_into_view_if_needed(timeout=3000)
+                await btn.click(timeout=4000)
+                await asyncio.sleep(1.8)
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def scroll_to_reviews(page: Page) -> None:
     tab = page.get_by_role("tab", name=re.compile(r"reviews", re.I)).first
     if await tab.count() and await tab.is_visible():
@@ -106,78 +186,131 @@ async def scroll_to_reviews(page: Page) -> None:
         await page.mouse.wheel(0, 800)
         await asyncio.sleep(0.25)
 
+    # Open the full reviews panel so page controls become available
+    await open_all_reviews_panel(page)
+    await asyncio.sleep(0.5)
+
 
 async def click_load_more(page: Page, max_clicks: int = 50) -> int:
-    """Only click load-more inside buyer reviews — not gig description 'See more'."""
+    """
+    Expand the reviews list via 'Show More Reviews' / similar.
+    Large gigs often have NO page numbers — only this button (adds ~5 cards/click).
+    """
     clicks = 0
-    scope = page.locator(REVIEW_SECTION).first
-    if not await scope.count():
-        scope = page.locator("body")
+    load_more_re = re.compile(
+        r"^(show more reviews|load more reviews|see more reviews|more reviews|"
+        r"show more|load more)$",
+        re.I,
+    )
 
     for _ in range(max_clicks):
         try:
-            before_text = clean_text(await scope.inner_text(timeout=1000))
-            buttons = scope.locator('button, [role="button"], a')
-            count = min(await buttons.count(), 80)
+            before = await page.evaluate(
+                """() => document.querySelectorAll(
+                  '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+                ).length"""
+            )
+            # Prefer exact "Show More Reviews" body-wide (not scoped — button sits under the list)
             clicked = False
-            for i in range(count):
-                btn = buttons.nth(i)
-                text = clean_text(await btn.inner_text(timeout=700))
-                aria = clean_text(await btn.get_attribute("aria-label") or "")
-                label = text or aria
-                if not re.match(
-                    r"^(show more|see more|load more|show more reviews|load more reviews|see all reviews|more reviews)$",
-                    label,
-                    re.I,
-                ):
-                    continue
-                if len(label) > 40:
-                    continue
-                marker_parts = []
-                for attr in ("class", "id", "data-testid"):
-                    marker_parts.append(clean_text(await btn.get_attribute(attr) or ""))
-                marker = " ".join(marker_parts)
-                if re.search(r"expand-description|gig-description|package", marker, re.I):
-                    continue
-                if not await btn.is_visible(timeout=500):
-                    continue
+            for loc in (
+                page.get_by_role("button", name=re.compile(r"show more reviews", re.I)),
+                page.locator('button:has-text("Show More Reviews")'),
+                page.locator('button:has-text("Load More Reviews")'),
+                page.locator('button:has-text("More Reviews")'),
+            ):
                 try:
-                    if not await btn.is_enabled(timeout=500):
+                    btn = loc.first
+                    if not await btn.count() or not await btn.is_visible(timeout=600):
                         continue
+                    label = clean_text(await btn.inner_text(timeout=700) or "")
+                    if not load_more_re.match(label) and "review" not in label.lower():
+                        continue
+                    marker = " ".join(
+                        clean_text(await btn.get_attribute(a) or "")
+                        for a in ("class", "id", "data-testid")
+                    )
+                    if re.search(r"expand-description|gig-description|package", marker, re.I):
+                        continue
+                    await btn.scroll_into_view_if_needed(timeout=3000)
+                    await btn.click(timeout=4000)
+                    clicked = True
+                    break
                 except Exception:
-                    pass
-                await btn.click(timeout=3000)
-                clicked = True
-                break
+                    continue
+
+            if not clicked:
+                # JS fallback
+                clicked = await page.evaluate(
+                    """() => {
+                      const isVisible = (el) => {
+                        const r = el.getBoundingClientRect();
+                        const st = getComputedStyle(el);
+                        return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none';
+                      };
+                      for (const el of document.querySelectorAll('button, [role="button"]')) {
+                        if (!isVisible(el)) continue;
+                        const label = ((el.innerText || el.getAttribute('aria-label') || '') + '')
+                          .replace(/\\s+/g, ' ').trim();
+                        if (!/^(show more reviews|load more reviews|see more reviews|more reviews)$/i.test(label)) continue;
+                        if (/expand-description|gig-description/i.test((el.className || '').toString())) continue;
+                        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+                        el.click();
+                        return true;
+                      }
+                      return false;
+                    }"""
+                )
+
             if not clicked:
                 break
             clicks += 1
-            await asyncio.sleep(0.85)
-            await page.mouse.wheel(0, 400)
-            after_text = clean_text(await scope.inner_text(timeout=1000))
-            if len(after_text) <= len(before_text) + 5:
-                break
+            await asyncio.sleep(0.9)
+            after = await page.evaluate(
+                """() => document.querySelectorAll(
+                  '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+                ).length"""
+            )
+            if after <= before:
+                # One retry scroll then stop if still stuck
+                await page.mouse.wheel(0, 900)
+                await asyncio.sleep(0.5)
+                after2 = await page.evaluate(
+                    """() => document.querySelectorAll(
+                      '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+                    ).length"""
+                )
+                if after2 <= before:
+                    break
         except Exception:
             break
     return clicks
 
 
 async def _close_open_dialogs(page: Page) -> None:
-    """Dismiss any open gallery/portfolio overlay that could interfere with review pagination."""
+    """
+    Dismiss gallery/portfolio overlays — but NEVER the full reviews panel
+    (that dialog is where pagination lives on modern Fiverr gig pages).
+    """
     try:
-        for sel in (
-            '[role="dialog"] button[aria-label*="close" i]',
-            '[role="dialog"] button[aria-label*="dismiss" i]',
-            '[class*="overlay" i] button[aria-label*="close" i]',
-        ):
-            btn = page.locator(sel).first
-            if await btn.count() and await btn.is_visible():
-                await btn.click(timeout=2000)
+        dialogs = page.locator('[role="dialog"]:visible')
+        for i in range(min(await dialogs.count(), 6)):
+            dlg = dialogs.nth(i)
+            try:
+                text = clean_text(await dlg.inner_text(timeout=800))[:400].lower()
+            except Exception:
+                text = ""
+            # Keep the reviews modal open
+            if "review" in text or await dlg.locator(
+                '[data-testid*="review" i], [class*="review-card" i]'
+            ).count():
+                continue
+            close_btn = dlg.locator(
+                'button[aria-label*="close" i], button[aria-label*="dismiss" i]'
+            ).first
+            if await close_btn.count() and await close_btn.is_visible():
+                await close_btn.click(timeout=2000)
                 await asyncio.sleep(0.3)
                 return
-        if await page.locator('[role="dialog"]:visible').count():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
     except Exception:
         pass
 
@@ -196,7 +329,9 @@ async def click_next_review_page(page: Page, current_page: int) -> bool:
     try:
         await page.evaluate(
             """() => {
-              const cards = document.querySelectorAll(
+              const root =
+                document.querySelector('[role="dialog"]') || document;
+              const cards = root.querySelectorAll(
                 '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
               );
               if (cards.length) {
@@ -227,16 +362,24 @@ async def click_next_review_page(page: Page, current_page: int) -> bool:
                 /disabled/i.test(el.className || '') ||
                 /disabled/i.test(el.parentElement?.className || '');
 
-              const cards = Array.from(document.querySelectorAll(
+              // Prefer a reviews dialog that actually contains review cards
+              let root = document;
+              for (const d of document.querySelectorAll('[role="dialog"]')) {
+                const cardsIn = d.querySelectorAll(
+                  '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+                ).length;
+                if (cardsIn >= 2) { root = d; break; }
+              }
+              const cards = Array.from(root.querySelectorAll(
                 '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
               )).filter(isVisible);
-              let anchorY = window.scrollY + window.innerHeight * 0.55;
+              let anchorY = window.innerHeight * 0.55;
               if (cards.length) {
                 const last = cards[cards.length - 1].getBoundingClientRect();
                 anchorY = last.bottom;
               }
 
-              const nodes = document.querySelectorAll(
+              const nodes = root.querySelectorAll(
                 'button, a, [role="button"], [role="link"], li, span, div[class*="page" i]'
               );
               const candidates = [];
@@ -282,11 +425,15 @@ async def click_next_review_page(page: Page, current_page: int) -> bool:
     except Exception:
         pass
 
-    # Fallback: Playwright locators (body-wide — pagination is often outside REVIEW_SECTION)
-    scopes = [page.locator("body")]
+    # Fallback: Playwright locators — dialog first, then review section, then body
+    scopes = []
+    dialog = page.locator('[role="dialog"]').first
+    if await dialog.count():
+        scopes.append(dialog)
     section = page.locator(REVIEW_SECTION).first
     if await section.count():
-        scopes.insert(0, section)
+        scopes.append(section)
+    scopes.append(page.locator("body"))
 
     for scope in scopes:
         candidates = [
@@ -966,12 +1113,13 @@ async def extract_reviews(
         )
 
     await scroll_to_reviews(page)
+    opened_panel = await open_all_reviews_panel(page)
+    if opened_panel:
+        append_activity(job_id, "Opened full reviews panel (See all reviews)")
     review_page = 1
     total_load_clicks = 0
     seen_page_signatures: set[str] = set()
     consecutive_empty_pages = 0
-
-    await _close_open_dialogs(page)
 
     while True:
         if review_page > max(1, config.REVIEW_MAX_PAGES):
@@ -1134,27 +1282,41 @@ async def extract_reviews(
                 await scroll_to_reviews(page)
                 continue
 
-        # Last resort: infinite-scroll / lazy-load gigs (no page buttons)
-        if review_page == 1:
-            before_count = len(candidates)
-            scroll_rounds = await scroll_load_more_reviews(
-                page, max_rounds=config.REVIEW_SCROLL_LOAD_MAX
+        # Many large gigs use "Show More Reviews" instead of page numbers
+        before_count = len(candidates)
+        more = await click_load_more(
+            page, max_clicks=min(25, max(1, config.REVIEW_LOAD_MORE_MAX))
+        )
+        total_load_clicks += more
+        if more > 0:
+            append_activity(
+                job_id,
+                f"No page buttons — expanded via Show More Reviews "
+                f"(+{more} clicks, was {before_count} cards)",
             )
-            after_cards = await _collect_review_cards(page)
-            if scroll_rounds > 0 and len(after_cards) > before_count:
-                append_activity(
-                    job_id,
-                    f"No pagination controls found — scroll-loaded more reviews "
-                    f"({scroll_rounds} rounds, {before_count}→{len(after_cards)} cards)",
-                )
-                # Drop prior signature so the expanded DOM is re-parsed
-                seen_page_signatures.clear()
-                review_page += 1
-                continue
+            seen_page_signatures.clear()
+            review_page += 1
+            continue
+
+        # Last resort: scroll/lazy-load
+        scroll_rounds = await scroll_load_more_reviews(
+            page, max_rounds=min(15, config.REVIEW_SCROLL_LOAD_MAX)
+        )
+        after_cards = await _collect_review_cards(page)
+        if scroll_rounds > 0 and len(after_cards) > before_count:
+            append_activity(
+                job_id,
+                f"Scroll-loaded more reviews "
+                f"({scroll_rounds} rounds, {before_count}→{len(after_cards)} cards)",
+            )
+            seen_page_signatures.clear()
+            review_page += 1
+            continue
 
         append_activity(
             job_id,
-            f"Review pagination ended after page {review_page} (no next page control)",
+            f"Review pagination ended after page {review_page} "
+            f"(no next page / show-more control)",
         )
         break
 

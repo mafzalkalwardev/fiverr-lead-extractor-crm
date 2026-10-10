@@ -345,6 +345,66 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                     job_id,
                     f"Seller extracted: name={seller_label} username={seller_username}",
                 )
+                # Reload limits before streaming saves so UI counters stay accurate
+                fresh_limits = get_job(job_id) or current
+                job = {
+                    **job,
+                    "maxTotalLeads": fresh_limits.get("maxTotalLeads", job.get("maxTotalLeads")),
+                    "reviewImageMode": fresh_limits.get(
+                        "reviewImageMode", job.get("reviewImageMode")
+                    ),
+                    "targetCountries": fresh_limits.get(
+                        "targetCountries", job.get("targetCountries")
+                    ),
+                }
+                max_leads_live = int(job.get("maxTotalLeads") or 100)
+                leads_before = state["us_leads"] + state["canada_leads"]
+                live_saved = 0
+                live_dupes = 0
+
+                def _on_review(review: dict) -> bool:
+                    nonlocal live_saved, live_dupes, job
+                    # Pick up mid-run cap changes
+                    latest = get_job(job_id) or job
+                    job = {
+                        **job,
+                        "maxTotalLeads": latest.get("maxTotalLeads", job.get("maxTotalLeads")),
+                        "reviewImageMode": latest.get(
+                            "reviewImageMode", job.get("reviewImageMode")
+                        ),
+                        "targetCountries": latest.get(
+                            "targetCountries", job.get("targetCountries")
+                        ),
+                        "reextractFromStart": latest.get(
+                            "reextractFromStart", job.get("reextractFromStart")
+                        ),
+                    }
+                    cap = int(job.get("maxTotalLeads") or max_leads_live)
+                    if state["us_leads"] + state["canada_leads"] >= cap:
+                        return False
+                    saved, country, reason = save_lead_if_qualified(job, gig, review)
+                    if saved:
+                        bucket = count_lead_bucket(country)
+                        if bucket == "us":
+                            state["us_leads"] += 1
+                        elif bucket == "canada":
+                            state["canada_leads"] += 1
+                        live_saved += 1
+                        append_activity(
+                            job_id,
+                            f"Lead saved: {review.get('reviewerName', '')} ({country})",
+                        )
+                        refresh_job_counters(job_id, state)
+                        if state["us_leads"] + state["canada_leads"] >= cap:
+                            append_activity(
+                                job_id,
+                                f"Lead limit reached ({cap}) — stopping review extraction",
+                            )
+                            return False
+                    elif reason == "duplicate":
+                        live_dupes += 1
+                    return True
+
                 reviews, checked = await extract_reviews(
                     page,
                     max_reviews,
@@ -353,20 +413,19 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                     progress_base=state["reviews_checked"],
                     review_image_mode=image_mode,
                     main_gig_image=gig.get("mainGigImage") or "",
+                    on_review=_on_review,
                 )
 
                 state["gigs_scanned"] += 1
                 state["reviews_checked"] += checked
-                leads_before = state["us_leads"] + state["canada_leads"]
-                # Reload max leads from DB in case user raised the cap mid-run
-                fresh_limits = get_job(job_id) or current
-                job = {
-                    **job,
-                    "maxTotalLeads": fresh_limits.get("maxTotalLeads", job.get("maxTotalLeads")),
-                    "reviewImageMode": fresh_limits.get("reviewImageMode", job.get("reviewImageMode")),
-                    "targetCountries": fresh_limits.get("targetCountries", job.get("targetCountries")),
-                }
+                # Reviews already streamed to DB; reconcile any leftovers / duplicates
                 save_result = await _save_reviews(job, job_id, gig, reviews, state)
+                if live_saved:
+                    append_activity(
+                        job_id,
+                        f"Live-saved {live_saved} lead(s) during extraction "
+                        f"(duplicates during live pass: {live_dupes})",
+                    )
                 leads_after = state["us_leads"] + state["canada_leads"]
                 append_activity(
                     job_id,

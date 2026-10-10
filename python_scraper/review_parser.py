@@ -1074,14 +1074,33 @@ async def extract_reviews(
     progress_base: int = 0,
     review_image_mode: str = "with_image",
     main_gig_image: str = "",
+    on_review=None,
 ) -> tuple[list[dict], int]:
     """
     Load all review pages on the current gig page, then return US/CA reviews.
     max_reviews <= 0 means no cap.
+
+    on_review: optional callback(review_dict) -> bool.
+    Return False from the callback to stop extraction early (e.g. lead limit).
     """
     unlimited = max_reviews <= 0
     if not unlimited and max_reviews < 1:
         max_reviews = 500
+    stop_requested = False
+
+    def _emit(review: dict) -> bool:
+        nonlocal stop_requested
+        if on_review is None:
+            return True
+        try:
+            cont = on_review(review)
+        except Exception as err:
+            append_activity(job_id, f"Live lead save error: {err}")
+            return True
+        if cont is False:
+            stop_requested = True
+            return False
+        return True
 
     with_images = review_image_mode != "without_image"
     reject_image_urls = {
@@ -1111,6 +1130,12 @@ async def extract_reviews(
             job_id,
             f"JSON reviews parsed: {len(parsed)}/{len(json_reviews)} US/CA reviews ({mode_note})",
         )
+        # Stream JSON hits immediately so the UI/export fills while DOM scraping continues
+        for jr in list(parsed):
+            if not _emit(jr):
+                break
+        if stop_requested:
+            return parsed, checked
 
     await scroll_to_reviews(page)
     opened_panel = await open_all_reviews_panel(page)
@@ -1230,18 +1255,19 @@ async def extract_reviews(
                 job_id,
                 f"Reviewer extracted: {reviewer} | country={norm} | rating={rating} | page={review_page}",
             )
-            parsed.append(
-                {
-                    "reviewerName": reviewer,
-                    "reviewerCountry": norm,
-                    "reviewText": text,
-                    "reviewRating": rating,
-                    "reviewDate": review_date,
-                    "reviewedImageLink": image if with_images else "",
-                    "cardText": card_text,
-                    "reviewPage": review_page,
-                }
-            )
+            review_row = {
+                "reviewerName": reviewer,
+                "reviewerCountry": norm,
+                "reviewText": text,
+                "reviewRating": rating,
+                "reviewDate": review_date,
+                "reviewedImageLink": image if with_images else "",
+                "cardText": card_text,
+                "reviewPage": review_page,
+            }
+            parsed.append(review_row)
+            if not _emit(review_row):
+                break
 
             if not unlimited and len(parsed) >= max_reviews:
                 break
@@ -1259,7 +1285,7 @@ async def extract_reviews(
             f"Review page {review_page}: kept {kept_on_page} US/CA review(s); total kept {len(parsed)}",
         )
 
-        if not unlimited and len(parsed) >= max_reviews:
+        if stop_requested or (not unlimited and len(parsed) >= max_reviews):
             break
         await _close_open_dialogs(page)
 

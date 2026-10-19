@@ -139,6 +139,9 @@ def _launch_kwargs() -> dict[str, Any]:
             "--mute-audio",
             "--no-first-run",
             "--no-default-browser-check",
+            # Prevent "Restore pages?" bubble from blocking Press & Hold clicks
+            "--hide-crash-restore-bubble",
+            "--disable-session-crashed-bubble",
             "--disable-features=IsolateOrigins,site-per-process",
             f"--window-size={config.BROWSER_WINDOW_WIDTH},{config.BROWSER_WINDOW_HEIGHT}",
             f"--window-position={config.BROWSER_WINDOW_X},{config.BROWSER_WINDOW_Y}",
@@ -179,6 +182,17 @@ async def _safe_close_page(page: Page) -> None:
         pass
 
 
+_VERIF_KEYWORDS = (
+    "captcha", "perimeterx", "px-captcha", "human-touch", "humantouch",
+    "human_touch", "verification", "challenge", "press-hold", "press_hold",
+)
+
+
+def _url_looks_like_verification(url: str) -> bool:
+    u = (url or "").lower()
+    return any(k in u for k in _VERIF_KEYWORDS)
+
+
 async def _normalize_single_tab(
     ctx: BrowserContext, keep: Optional[Page] = None
 ) -> Page:
@@ -199,6 +213,15 @@ async def _normalize_single_tab(
     for extra in pages:
         if extra is primary:
             continue
+        # Never close a captcha / Press & Hold tab — that freezes the job
+        try:
+            if _url_looks_like_verification(extra.url):
+                continue
+            title = (await extra.title() or "").lower()
+            if any(k in title for k in ("captcha", "verification", "human", "press")):
+                continue
+        except Exception:
+            pass
         await _safe_close_page(extra)
 
     _set_page_defaults(primary)
@@ -211,12 +234,6 @@ async def close_extra_pages(keep: Page) -> Page:
     if keep.is_closed():
         return await get_work_page()
     return await _normalize_single_tab(keep.context, keep)
-
-
-_VERIF_KEYWORDS = (
-    "captcha", "perimeterx", "px-captcha", "human-touch", "humantouch",
-    "human_touch", "verification", "challenge", "press-hold", "press_hold",
-)
 
 
 async def _auto_close_new_tab(new_page: Page) -> None:

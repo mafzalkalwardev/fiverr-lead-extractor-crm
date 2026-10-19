@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 from datetime import datetime
 
 from playwright.async_api import Locator, Page
@@ -17,9 +18,16 @@ from utils import (
     parse_rating_after_country,
     reviewer_name_before_country,
 )
-from db import append_activity, update_job
+from db import append_activity, set_heartbeat, update_job
 from page_data import extract_reviews_from_page_json
-from verification import assert_page_accessible
+from typing import Optional
+
+from verification import (
+    VerificationRequiredError,
+    assert_page_accessible,
+    find_context_verification_page,
+    is_verification_page,
+)
 
 # Avoid gig-page carousel / description expanders (causes timeouts & wrong clicks)
 REVIEW_SECTION = (
@@ -79,6 +87,83 @@ def _image_from_srcset(srcset: str) -> str:
         return ""
     first = srcset.split(",")[0].strip().split()[0]
     return absolutize_url(first)
+
+
+async def read_listed_review_count(page: Page) -> int:
+    """
+    Read the review count shown on the gig (near the star rating / 'See all reviews').
+    Used as the target number of reviews to walk through before stopping.
+    """
+    try:
+        count = await page.evaluate(
+            """() => {
+              const parseCount = (raw) => {
+                if (!raw) return 0;
+                const t = String(raw).replace(/\\s+/g, ' ').trim();
+                // 2.9k / 2,9k style
+                let m = t.match(/(\\d+(?:[.,]\\d+)?)\\s*([kKmM])\\b/);
+                if (m) {
+                  let n = parseFloat(m[1].replace(',', '.'));
+                  const u = m[2].toLowerCase();
+                  if (u === 'k') n *= 1000;
+                  if (u === 'm') n *= 1000000;
+                  return Math.round(n);
+                }
+                m = t.match(/(\\d{1,3}(?:,\\d{3})+|\\d{4,7}|\\d{1,3})/);
+                if (!m) return 0;
+                return parseInt(m[1].replace(/,/g, ''), 10) || 0;
+              };
+
+              const candidates = [];
+              const push = (n, source) => {
+                if (n >= 5 && n <= 500000) candidates.push({ n, source });
+              };
+
+              // JSON-LD AggregateRating
+              for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+                try {
+                  const data = JSON.parse(s.textContent || '');
+                  const items = Array.isArray(data) ? data : [data];
+                  for (const it of items) {
+                    const ar = it && (it.aggregateRating || it.AggregateRating);
+                    if (!ar) continue;
+                    push(parseCount(ar.ratingCount || ar.reviewCount || ar.ratingcount), 'jsonld');
+                  }
+                } catch (e) {}
+              }
+
+              // Visible UI near top / reviews header
+              const nodes = document.querySelectorAll(
+                'a, button, span, p, div, [role="button"], [data-testid*="review" i], [class*="rating" i], [class*="review" i]'
+              );
+              for (const el of nodes) {
+                const r = el.getBoundingClientRect();
+                if (r.width < 8 || r.height < 8) continue;
+                // Prefer header / mid page — skip deep footer noise
+                if (r.top > Math.min(innerHeight * 1.8, 2200)) continue;
+                const label = ((el.innerText || el.getAttribute('aria-label') || '') + '')
+                  .replace(/\\s+/g, ' ').trim();
+                if (!label || label.length > 80) continue;
+                if (!/review/i.test(label) && !/\\(\\s*[\\d,.]+\\s*[kKmM]?\\s*\\)/.test(label)) continue;
+                // "(2,934 reviews)" / "2934 Reviews" / "See all reviews (120)"
+                let m = label.match(/([\\d,.]+\\s*[kKmM]?)\\s*reviews?\\b/i);
+                if (!m) m = label.match(/\\(\\s*([\\d,.]+\\s*[kKmM]?)\\s*\\)/);
+                if (!m) continue;
+                push(parseCount(m[1]), 'dom:' + label.slice(0, 40));
+              }
+
+              if (!candidates.length) return 0;
+              // Prefer the largest plausible count (gig total, not "5 reviews" chips)
+              candidates.sort((a, b) => b.n - a.n);
+              return candidates[0].n;
+            }"""
+        )
+    except Exception:
+        count = 0
+    try:
+        return max(0, int(count or 0))
+    except Exception:
+        return 0
 
 
 async def open_all_reviews_panel(page: Page) -> bool:
@@ -191,12 +276,70 @@ async def scroll_to_reviews(page: Page) -> None:
     await asyncio.sleep(0.5)
 
 
-async def click_load_more(page: Page, max_clicks: int = 50) -> int:
+async def _raise_if_verification(
+    page: Page,
+    *,
+    thorough: bool = False,
+    job_id: str = "",
+    return_url: Optional[str] = None,
+) -> None:
+    """
+    When a challenge appears mid-scrape: wait/clear in place when job_id is known
+    (keeps us on the gig). Only raise when we cannot wait here.
+    Always clears the mid-page "Before we continue / Press & Hold" popup the same
+    way as the full-page challenge — not optional.
+    """
+    try:
+        # Always thorough for this check — the popup must never be skipped
+        challenged = await is_verification_page(page, thorough=True)
+        if not challenged:
+            challenged = await find_context_verification_page(page) is not None
+        if not challenged:
+            return
+        if job_id:
+            await assert_page_accessible(page, job_id, return_url)
+            return
+        raise VerificationRequiredError(
+            "Fiverr verification appeared during review loading"
+        )
+    except VerificationRequiredError:
+        raise
+    except Exception as err:
+        print(f"[reviews] verification check error: {err}")
+
+
+async def _review_list_fingerprint(page: Page) -> str:
+    """Detect list changes even when Fiverr keeps ~10 cards and replaces them."""
+    try:
+        return await page.evaluate(
+            """() => {
+              const cards = Array.from(document.querySelectorAll(
+                '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+              ));
+              const slice = (arr) => arr.map(c => ((c.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 50)));
+              const head = slice(cards.slice(0, 4));
+              const tail = slice(cards.slice(-3));
+              return cards.length + '|' + head.join('~') + '|' + tail.join('~');
+            }"""
+        )
+    except Exception:
+        return ""
+
+
+async def click_load_more(
+    page: Page,
+    max_clicks: int = 50,
+    *,
+    job_id: str = "",
+    return_url: Optional[str] = None,
+) -> int:
     """
     Expand the reviews list via 'Show More Reviews' / similar.
     Large gigs often have NO page numbers — only this button (adds ~5 cards/click).
+    Fiverr may REPLACE the visible ~10 cards instead of appending — detect that too.
     """
     clicks = 0
+    stagnant = 0
     load_more_re = re.compile(
         r"^(show more reviews|load more reviews|see more reviews|more reviews|"
         r"show more|load more)$",
@@ -205,12 +348,26 @@ async def click_load_more(page: Page, max_clicks: int = 50) -> int:
 
     for _ in range(max_clicks):
         try:
-            before = await page.evaluate(
-                """() => document.querySelectorAll(
-                  '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
-                ).length"""
+            # Every expand — clear Press & Hold popup immediately if it appeared
+            await _raise_if_verification(
+                page,
+                thorough=True,
+                job_id=job_id,
+                return_url=return_url,
             )
-            # Prefer exact "Show More Reviews" body-wide (not scoped — button sits under the list)
+            if clicks and clicks % 10 == 0:
+                try:
+                    set_heartbeat()
+                except Exception:
+                    pass
+
+            before_fp = await _review_list_fingerprint(page)
+            before = 0
+            try:
+                before = int(str(before_fp).split("|", 1)[0] or "0")
+            except Exception:
+                before = 0
+
             clicked = False
             for loc in (
                 page.get_by_role("button", name=re.compile(r"show more reviews", re.I)),
@@ -220,9 +377,9 @@ async def click_load_more(page: Page, max_clicks: int = 50) -> int:
             ):
                 try:
                     btn = loc.first
-                    if not await btn.count() or not await btn.is_visible(timeout=600):
+                    if not await btn.count() or not await btn.is_visible(timeout=500):
                         continue
-                    label = clean_text(await btn.inner_text(timeout=700) or "")
+                    label = clean_text(await btn.inner_text(timeout=600) or "")
                     if not load_more_re.match(label) and "review" not in label.lower():
                         continue
                     marker = " ".join(
@@ -231,15 +388,14 @@ async def click_load_more(page: Page, max_clicks: int = 50) -> int:
                     )
                     if re.search(r"expand-description|gig-description|package", marker, re.I):
                         continue
-                    await btn.scroll_into_view_if_needed(timeout=3000)
-                    await btn.click(timeout=4000)
+                    await btn.scroll_into_view_if_needed(timeout=2500)
+                    await btn.click(timeout=3500)
                     clicked = True
                     break
                 except Exception:
                     continue
 
             if not clicked:
-                # JS fallback
                 clicked = await page.evaluate(
                     """() => {
                       const isVisible = (el) => {
@@ -262,25 +418,41 @@ async def click_load_more(page: Page, max_clicks: int = 50) -> int:
                 )
 
             if not clicked:
+                await _raise_if_verification(
+                    page, thorough=True, job_id=job_id, return_url=return_url
+                )
                 break
             clicks += 1
-            await asyncio.sleep(0.9)
-            after = await page.evaluate(
-                """() => document.querySelectorAll(
-                  '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
-                ).length"""
+            await asyncio.sleep(0.4)
+            after_fp = await _review_list_fingerprint(page)
+            after = 0
+            try:
+                after = int(str(after_fp).split("|", 1)[0] or "0")
+            except Exception:
+                after = 0
+
+            content_changed = bool(after_fp) and after_fp != before_fp
+            grew = after > before
+            if grew or content_changed:
+                stagnant = 0
+                continue
+
+            # Popup often blocks growth — clear then retry before counting stagnant
+            await _raise_if_verification(
+                page, thorough=True, job_id=job_id, return_url=return_url
             )
-            if after <= before:
-                # One retry scroll then stop if still stuck
-                await page.mouse.wheel(0, 900)
-                await asyncio.sleep(0.5)
-                after2 = await page.evaluate(
-                    """() => document.querySelectorAll(
-                      '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
-                    ).length"""
-                )
-                if after2 <= before:
-                    break
+            await page.mouse.wheel(0, 900)
+            await asyncio.sleep(0.45)
+            after_fp2 = await _review_list_fingerprint(page)
+            if after_fp2 and after_fp2 != before_fp:
+                stagnant = 0
+                continue
+            stagnant += 1
+            # Need a few failed expands — one flaky click must not end the gig early
+            if stagnant >= 4:
+                break
+        except VerificationRequiredError:
+            raise
         except Exception:
             break
     return clicks
@@ -299,10 +471,16 @@ async def _close_open_dialogs(page: Page) -> None:
                 text = clean_text(await dlg.inner_text(timeout=800))[:400].lower()
             except Exception:
                 text = ""
-            # Keep the reviews modal open
-            if "review" in text or await dlg.locator(
-                '[data-testid*="review" i], [class*="review-card" i]'
-            ).count():
+            # Keep reviews modal + Press & Hold / PX popup open
+            if (
+                "review" in text
+                or "press" in text and "hold" in text
+                or "before we continue" in text
+                or "px-captcha" in text
+                or await dlg.locator(
+                    '#px-captcha, [data-testid*="review" i], [class*="review-card" i]'
+                ).count()
+            ):
                 continue
             close_btn = dlg.locator(
                 'button[aria-label*="close" i], button[aria-label*="dismiss" i]'
@@ -545,12 +723,18 @@ async def _find_country(card: Locator, card_text: str) -> str:
     ):
         loc = card.locator(sel)
         for i in range(min(await loc.count(), 12)):
-            t = clean_text(await loc.nth(i).inner_text(timeout=800))
+            try:
+                t = clean_text(await loc.nth(i).inner_text(timeout=500))
+            except Exception:
+                continue
             c = _normalize_target_country(t, allow_short_code=True)
             if c:
                 return c
             for attr in ("aria-label", "title", "alt"):
-                alt = await loc.nth(i).get_attribute(attr) or ""
+                try:
+                    alt = await loc.nth(i).get_attribute(attr) or ""
+                except Exception:
+                    alt = ""
                 c = _normalize_target_country(alt, allow_short_code=True)
                 if c:
                     return c
@@ -796,92 +980,176 @@ def _score_review_image(url: str, reject_urls: set[str] | None = None) -> int:
     return 0
 
 
-async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = None) -> str:
-    """Review attachment / delivery image — scroll card into view so lazy images populate."""
-    try:
-        await card.scroll_into_view_if_needed(timeout=3000)
-        await asyncio.sleep(0.35)
-    except Exception:
-        pass
-
+def _pick_best_image_url(
+    urls: list[str] | None, reject_urls: set[str] | None = None
+) -> str:
     best = ""
     best_score = 0
-
-    # Prefer resolved currentSrc (lazy-loaded) via a single evaluate
-    try:
-        urls = await card.evaluate(
-            """(el) => {
-              const out = [];
-              for (const img of el.querySelectorAll('img')) {
-                for (const u of [img.currentSrc, img.src, img.getAttribute('data-src'),
-                                 img.getAttribute('data-lazy-src'), img.getAttribute('data-original')]) {
-                  if (u && typeof u === 'string' && u.startsWith('http')) out.push(u);
-                }
-                const ss = img.getAttribute('srcset') || '';
-                if (ss) {
-                  const first = ss.split(',')[0].trim().split(/\\s+/)[0];
-                  if (first) out.push(first.startsWith('http') ? first : (first.startsWith('//') ? 'https:' + first : first));
-                }
-              }
-              for (const a of el.querySelectorAll('a[href]')) {
-                const h = a.getAttribute('href') || '';
-                if (/\\.(jpg|jpeg|png|webp)|cloudinary|fiverr-res|attachment|delivery/i.test(h)) out.push(h);
-              }
-              return out;
-            }"""
-        )
-        for src in urls or []:
-            full = absolutize_url(src)
-            score = _score_review_image(full, reject_urls)
-            if score > best_score:
-                best_score = score
-                best = full
-    except Exception:
-        pass
-
-    imgs = card.locator("img")
-    for i in range(min(await imgs.count(), 30)):
-        img = imgs.nth(i)
-        for attr in ("src", "data-src", "data-lazy-src", "data-original"):
-            src = await img.get_attribute(attr) or ""
-            full = absolutize_url(src)
-            score = _score_review_image(full, reject_urls)
-            if score > best_score:
-                best_score = score
-                best = full
-        srcset = await img.get_attribute("srcset") or ""
-        full = _image_from_srcset(srcset)
+    for src in urls or []:
+        full = absolutize_url(src)
         score = _score_review_image(full, reject_urls)
         if score > best_score:
             best_score = score
             best = full
+    return best if best_score > 0 else ""
 
-    for sel in ('a[href*=".jpg"], a[href*=".jpeg"], a[href*=".png"], a[href*="cloudinary"]',):
+
+def _image_from_json_reviews(
+    reviewer: str, text: str, json_reviews: list[dict]
+) -> str:
+    """Fallback when DOM lazy-load misses a delivery thumbnail that page JSON already has."""
+    rev = clean_text(reviewer).lower()
+    text_key = clean_text(text)[:80].lower()
+    for jr in json_reviews:
+        img = absolutize_url(jr.get("reviewedImageLink") or "")
+        if not img or not is_valid_review_image(img):
+            continue
+        jr_name = clean_text(jr.get("reviewerName") or "").lower()
+        jr_text = clean_text(jr.get("reviewText") or "")[:80].lower()
+        if rev and jr_name == rev:
+            return img
+        if text_key and jr_text and (text_key[:50] in jr_text or jr_text[:50] in text_key):
+            return img
+    return ""
+
+
+async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = None) -> str:
+    """Review attachment / delivery image — scroll card into view so lazy images populate."""
+    try:
+        await card.scroll_into_view_if_needed(timeout=2000)
+        await asyncio.sleep(0.25)
+    except Exception:
+        pass
+
+    # Prefer resolved currentSrc (lazy-loaded), including parent review wrapper + siblings
+    try:
+        urls = await card.evaluate(
+            """(el) => {
+              const abs = (u) => {
+                if (!u || typeof u !== 'string') return '';
+                if (u.startsWith('http')) return u;
+                if (u.startsWith('//')) return 'https:' + u;
+                return '';
+              };
+              const pushSrcset = (ss, out) => {
+                if (!ss) return;
+                for (const part of ss.split(',')) {
+                  const first = part.trim().split(/\\s+/)[0];
+                  const a = abs(first);
+                  if (a) out.push(a);
+                }
+              };
+              const roots = [el];
+              const wrap = el.closest(
+                '[data-testid*="review-card" i], [class*="review-item-component-wrapper" i], [class*="review-card" i]'
+              );
+              if (wrap && wrap !== el) roots.push(wrap);
+              if (el.parentElement && !roots.includes(el.parentElement)) {
+                roots.push(el.parentElement);
+              }
+              let sib = el.nextElementSibling;
+              for (let i = 0; i < 2 && sib; i++, sib = sib.nextElementSibling) {
+                roots.push(sib);
+              }
+              const out = [];
+              for (const root of roots) {
+                for (const img of root.querySelectorAll('img, picture source, source')) {
+                  for (const u of [
+                    img.currentSrc, img.src,
+                    img.getAttribute('data-src'),
+                    img.getAttribute('data-lazy-src'),
+                    img.getAttribute('data-original'),
+                    img.getAttribute('data-url'),
+                  ]) {
+                    const a = abs(u);
+                    if (a) out.push(a);
+                  }
+                  pushSrcset(img.getAttribute('srcset') || '', out);
+                  pushSrcset(img.getAttribute('data-srcset') || '', out);
+                }
+                for (const a of root.querySelectorAll('a[href]')) {
+                  const h = a.getAttribute('href') || '';
+                  if (/\\.(jpg|jpeg|png|webp)|cloudinary|fiverr-res|attachment|delivery|t_smartwm/i.test(h)) {
+                    const absH = abs(h.startsWith('/') ? (location.origin + h) : h) || h;
+                    if (absH.startsWith('http')) out.push(absH);
+                  }
+                }
+                for (const node of root.querySelectorAll('[style*="background"]')) {
+                  const style = node.getAttribute('style') || '';
+                  const m = style.match(/url\\([\"']?([^\"')]+)/i);
+                  if (m) {
+                    const a = abs(m[1]);
+                    if (a) out.push(a);
+                  }
+                }
+              }
+              return out;
+            }"""
+        )
+        best = _pick_best_image_url(urls, reject_urls)
+        if best:
+            return best
+    except Exception:
+        pass
+
+    # Hover media tiles — some Fiverr thumbs only resolve src after hover
+    try:
+        media = card.locator(
+            '[class*="attachment" i], [class*="media" i], [data-testid*="attachment" i], '
+            'button:has(img), a:has(img)'
+        )
+        for i in range(min(await media.count(), 4)):
+            try:
+                await media.nth(i).hover(timeout=800)
+                await asyncio.sleep(0.15)
+            except Exception:
+                pass
+        urls = await card.evaluate(
+            """(el) => {
+              const out = [];
+              for (const img of el.querySelectorAll('img')) {
+                for (const u of [img.currentSrc, img.src, img.getAttribute('data-src')]) {
+                  if (u && u.startsWith('http')) out.push(u);
+                }
+              }
+              return out;
+            }"""
+        )
+        best = _pick_best_image_url(urls, reject_urls)
+        if best:
+            return best
+    except Exception:
+        pass
+
+    imgs = card.locator("img")
+    urls: list[str] = []
+    for i in range(min(await imgs.count(), 30)):
+        img = imgs.nth(i)
+        for attr in ("src", "data-src", "data-lazy-src", "data-original"):
+            src = await img.get_attribute(attr) or ""
+            if src:
+                urls.append(src)
+        srcset = await img.get_attribute("srcset") or ""
+        if srcset:
+            urls.append(_image_from_srcset(srcset))
+
+    for sel in (
+        'a[href*=".jpg"], a[href*=".jpeg"], a[href*=".png"], a[href*="cloudinary"], a[href*="attachment"]',
+    ):
         links = card.locator(sel)
         for i in range(min(await links.count(), 8)):
             href = await links.nth(i).get_attribute("href") or ""
-            full = absolutize_url(href)
-            score = _score_review_image(full, reject_urls)
-            if score > best_score:
-                best_score = score
-                best = full
+            if href:
+                urls.append(href)
 
     styled = card.locator('[style*="background"]')
     for i in range(min(await styled.count(), 12)):
         style = await styled.nth(i).get_attribute("style") or ""
         match = re.search(r"url\([\"']?([^\"')]+)", style)
-        if not match:
-            continue
-        full = absolutize_url(match.group(1))
-        score = _score_review_image(full, reject_urls)
-        if score > best_score:
-            best_score = score
-            best = full
+        if match:
+            urls.append(match.group(1))
 
-    if best and best_score > 0:
-        return best
-    return ""
-
+    return _pick_best_image_url(urls, reject_urls)
 
 def _country_mention_count(text: str) -> int:
     return len(re.findall(r"\b(United States|USA|U\.S\.?|Canada)\b", text, re.I))
@@ -920,24 +1188,33 @@ async def _collect_review_cards(page: Page) -> list[tuple[Locator, str]]:
 
     for selector_index, sel in enumerate(REVIEW_CARD_SELECTORS):
         loc = page.locator(sel)
-        for i in range(min(await loc.count(), 500)):
-            card = loc.nth(i)
-            text = await _card_text(card)
-            if len(text) < 40 or len(text) > 4500:
+        scan_cap = max(100, int(getattr(config, "REVIEW_CARD_SCAN_MAX", 5000)))
+        for i in range(min(await loc.count(), scan_cap)):
+            try:
+                card = loc.nth(i)
+                text = await _card_text(card)
+                if len(text) < 40 or len(text) > 4500:
+                    continue
+                key = text[:100].lower()
+                if key in seen:
+                    continue
+                country = await _find_country(card, text)
+                class_name = (await card.get_attribute("class") or "").lower()
+                if "review-item-description" in class_name:
+                    continue
+                if not country and "review" not in class_name:
+                    continue
+                if (
+                    selector_index >= 3
+                    and _country_mention_count(text) > 3
+                    and "review" not in class_name
+                ):
+                    continue
+                seen.add(key)
+                out.append((card, text, class_name))
+            except Exception:
+                # Stale node after Show More / virtualization — skip, keep scanning
                 continue
-            key = text[:100].lower()
-            if key in seen:
-                continue
-            country = await _find_country(card, text)
-            class_name = (await card.get_attribute("class") or "").lower()
-            if "review-item-description" in class_name:
-                continue
-            if not country and "review" not in class_name:
-                continue
-            if selector_index >= 3 and _country_mention_count(text) > 3 and "review" not in class_name:
-                continue
-            seen.add(key)
-            out.append((card, text, class_name))
         if out and selector_index < 3:
             break
     out.sort(
@@ -1075,6 +1352,7 @@ async def extract_reviews(
     review_image_mode: str = "with_image",
     main_gig_image: str = "",
     on_review=None,
+    gig_url: str = "",
 ) -> tuple[list[dict], int]:
     """
     Load all review pages on the current gig page, then return US/CA reviews.
@@ -1082,11 +1360,13 @@ async def extract_reviews(
 
     on_review: optional callback(review_dict) -> bool.
     Return False from the callback to stop extraction early (e.g. lead limit).
+    gig_url: pasted/target gig link — used to clear verification without leaving the gig.
     """
     unlimited = max_reviews <= 0
     if not unlimited and max_reviews < 1:
         max_reviews = 500
     stop_requested = False
+    return_url = gig_url or ""
 
     def _emit(review: dict) -> bool:
         nonlocal stop_requested
@@ -1138,13 +1418,96 @@ async def extract_reviews(
             return parsed, checked
 
     await scroll_to_reviews(page)
+    # Read listed total BEFORE opening the panel (count is on the gig header)
+    listed_review_count = await read_listed_review_count(page)
     opened_panel = await open_all_reviews_panel(page)
     if opened_panel:
         append_activity(job_id, "Opened full reviews panel (See all reviews)")
+    # Panel / "See all reviews (N)" can expose a better count
+    listed_review_count = max(listed_review_count, await read_listed_review_count(page))
+    if listed_review_count > 0:
+        append_activity(
+            job_id,
+            f"Gig lists ~{listed_review_count:,} reviews — will scan through them "
+            "and extract all targeted US/CA leads",
+        )
+        update_job(
+            job_id,
+            {
+                "listedReviewCount": listed_review_count,
+                "currentGigListedReviews": listed_review_count,
+            },
+        )
+    else:
+        append_activity(
+            job_id,
+            "Could not read gig review count from header — scanning until list ends",
+        )
+    # Stop early only after covering most of the listed total (or list truly ends)
+    listed_coverage_target = (
+        max(1, int(listed_review_count * 0.92)) if listed_review_count > 0 else 0
+    )
     review_page = 1
     total_load_clicks = 0
     seen_page_signatures: set[str] = set()
     consecutive_empty_pages = 0
+    stagnant_rounds = 0
+    # Cards already fully evaluated (kept or skipped) — avoid re-work that feels "stuck"
+    processed_card_fps: set[str] = set()
+    skip_stats = {"country": 0, "image": 0, "dup": 0, "other": 0}
+    skip_log_every = max(5, int(getattr(config, "REVIEW_SKIP_LOG_EVERY", 25)))
+    burst = max(1, int(getattr(config, "REVIEW_LOAD_MORE_BURST", 3)))
+    verif_every = max(8, int(getattr(config, "REVIEW_VERIF_CHECK_EVERY", 12)))
+    # Push scan progress to Live Monitor while walking cards (not only at page end)
+    live_push_every = max(1, int(getattr(config, "REVIEW_LIVE_PUSH_EVERY", 1)))
+    live_push_min_sec = float(getattr(config, "REVIEW_LIVE_PUSH_MIN_SEC", 0.35))
+    last_live_push = 0.0
+
+    def _card_fp(card_text: str) -> str:
+        return clean_text(card_text)[:120].lower()
+
+    def _push_live_scan(
+        *,
+        force: bool = False,
+        last_label: str = "",
+        last_country: str = "",
+    ) -> None:
+        nonlocal last_live_push
+        now = time.monotonic()
+        # Throttle DB writes (~3/sec) so Live Monitor stays smooth without overload
+        if not force and (now - last_live_push) < live_push_min_sec:
+            return
+        if not force and live_push_every > 1 and checked % live_push_every != 0:
+            return
+        last_live_push = now
+        fields = {
+            "currentReviewPage": review_page,
+            "totalReviewsParsed": progress_base + checked,
+            "reviewsChecked": progress_base + checked,
+            "status": "extracting_reviews",
+            "listedReviewCount": listed_review_count or None,
+        }
+        # Always pair label + country so UI never shows stale "non-target · United States"
+        if last_label or last_country:
+            fields["lastScannedReview"] = (last_label or "—")[:80]
+            fields["lastScannedCountry"] = (last_country or "")[:40]
+        try:
+            update_job(job_id, fields)
+            # Keep status banner green while a long card walk is in progress
+            set_heartbeat()
+        except Exception:
+            pass
+
+    def _note_skip(kind: str, detail: str = "") -> None:
+        skip_stats[kind] = skip_stats.get(kind, 0) + 1
+        total_skips = sum(skip_stats.values())
+        if total_skips % skip_log_every == 0:
+            append_activity(
+                job_id,
+                f"Skip summary: country={skip_stats['country']} noImage={skip_stats['image']} "
+                f"dup={skip_stats['dup']} other={skip_stats['other']}"
+                + (f" | last={detail}" if detail else ""),
+            )
 
     while True:
         if review_page > max(1, config.REVIEW_MAX_PAGES):
@@ -1154,40 +1517,41 @@ async def extract_reviews(
             )
             break
 
+        try:
+            set_heartbeat()
+        except Exception:
+            pass
         update_job(
             job_id,
             {
                 "currentReviewPage": review_page,
                 "totalReviewsParsed": progress_base + checked,
+                "reviewsChecked": progress_base + checked,
+                "status": "extracting_reviews",
             },
         )
 
-        load_clicks = await click_load_more(page, max_clicks=config.REVIEW_LOAD_MORE_MAX)
-        total_load_clicks += load_clicks
-        if load_clicks:
+        await _raise_if_verification(
+            page, thorough=True, job_id=job_id, return_url=return_url or None
+        )
+        await assert_page_accessible(page, job_id, return_url or None)
+
+        # Scan FIRST, then expand a tiny burst. Expanding 20× before scan drops
+        # reviews Fiverr swaps out of the DOM — that was the "missing reviews" bug.
+        candidates = await _collect_review_cards(page)
+        if review_page == 1 or review_page % 2 == 0 or total_load_clicks == 0:
             append_activity(
                 job_id,
-                f"Review page {review_page}: expanded reviews ({load_clicks} load-more clicks)",
+                f"Review page {review_page}: {len(candidates)} review block(s) in DOM "
+                f"(scanned={checked}, kept={len(parsed)}, showMoreClicks={total_load_clicks})",
             )
 
-        await assert_page_accessible(page, job_id)
-        candidates = await _collect_review_cards(page)
-        append_activity(
-            job_id,
-            f"Review page {review_page}: {len(candidates)} review block(s) found",
-        )
-        # Include card count so scroll-expanded DOM does not look like a "repeat"
         signature = f"{len(candidates)}|" + "|".join(
-            clean_text(text)[:120].lower() for _card, text in candidates[:10]
+            clean_text(text)[:80].lower() for _card, text in candidates[:8]
         )
-        if signature and signature in seen_page_signatures:
-            append_activity(
-                job_id,
-                f"Review page {review_page}: repeated page content detected; stopping pagination",
-            )
-            break
-        if signature:
-            seen_page_signatures.add(signature)
+        kept_before_page = len(parsed)
+        new_keys_before = len(seen_keys)
+        new_card_fps = 0
 
         if len(candidates) == 0:
             consecutive_empty_pages += 1
@@ -1201,160 +1565,258 @@ async def extract_reviews(
         else:
             consecutive_empty_pages = 0
 
-        kept_before_page = len(parsed)
-
         for card, card_text in candidates:
-            checked += 1
-
-            country = await _find_country(card, card_text)
-            norm = normalize_country(country)
-            if norm not in ("United States", "Canada"):
-                append_activity(
-                    job_id,
-                    f"Review skipped: country={country or 'missing/undetected'}",
-                )
-                continue
-
-            reviewer = await _reviewer_before_country_dom(card)
-            if not reviewer:
-                reviewer = reviewer_name_before_country(card_text)
-            if not reviewer:
-                reviewer = await _reviewer_name(card, card_text, seller_username)
-            reviewer = _fix_reviewer_from_json(reviewer, card_text, json_reviews)
-            if not reviewer or looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
-                reviewer = infer_reviewer_from_text(card_text, seller_username)
-            if not reviewer or looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
-                append_activity(job_id, "Review skipped: reviewer missing or looked like rating")
-                continue
-
-            rating = parse_rating_after_country(card_text)
-            text = await _review_text(card, card_text, reviewer, norm)
-            if len(text) < 15:
-                append_activity(job_id, f"Review skipped: text too short for reviewer={reviewer}")
-                continue
-
-            image = ""
-            if with_images:
-                image = await _review_delivery_image(card, reject_image_urls)
-                if image and not is_valid_review_image(image):
-                    image = ""
-                if not image:
-                    append_activity(job_id, f"Review skipped: no review image for reviewer={reviewer}")
+            try:
+                fp = _card_fp(card_text)
+                if fp in processed_card_fps:
                     continue
 
-            review_date = await _review_date(card, card_text)
-            key = f"{reviewer.strip().lower()}|{text[:100].lower()}"
-            text_key = clean_text(text)[:140].lower()
-            if key in seen_keys or text_key in seen_text_keys:
-                append_activity(job_id, f"Duplicate skipped: {reviewer} ({norm})")
+                checked += 1
+                if checked == 1 or checked % verif_every == 0:
+                    await _raise_if_verification(
+                        page,
+                        thorough=True,
+                        job_id=job_id,
+                        return_url=return_url or None,
+                    )
+
+                new_card_fps += 1
+                processed_card_fps.add(fp)
+                # Tick Live Monitor immediately so "Reviews scanned" moves per card
+                _push_live_scan(force=(checked == 1 or checked % 5 == 0))
+
+                country = await _find_country(card, card_text)
+                norm = normalize_country(country)
+                if norm not in ("United States", "Canada"):
+                    _note_skip("country", country or "missing")
+                    _push_live_scan(last_label=country or "non-target", last_country=country or "")
+                    continue
+
+                reviewer = await _reviewer_before_country_dom(card)
+                if not reviewer:
+                    reviewer = reviewer_name_before_country(card_text)
+                if not reviewer:
+                    reviewer = await _reviewer_name(card, card_text, seller_username)
+                reviewer = _fix_reviewer_from_json(reviewer, card_text, json_reviews)
+                if not reviewer or looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
+                    reviewer = infer_reviewer_from_text(card_text, seller_username)
+                if not reviewer or looks_like_rating(reviewer) or not is_valid_reviewer_name(reviewer):
+                    _note_skip("other", "bad reviewer")
+                    _push_live_scan(last_label="bad reviewer", last_country=norm)
+                    continue
+
+                rating = parse_rating_after_country(card_text)
+                text = await _review_text(card, card_text, reviewer, norm)
+                if len(text) < 15:
+                    _note_skip("other", f"short:{reviewer}")
+                    _push_live_scan(last_label=reviewer or "short", last_country=norm)
+                    continue
+
+                key = f"{reviewer.strip().lower()}|{text[:100].lower()}"
+                text_key = clean_text(text)[:140].lower()
+                if key in seen_keys or text_key in seen_text_keys:
+                    _note_skip("dup", reviewer)
+                    _push_live_scan(last_label=f"dup:{reviewer}", last_country=norm)
+                    continue
+
+                image = ""
+                if with_images:
+                    image = await _review_delivery_image(card, reject_image_urls)
+                    if image and not is_valid_review_image(image):
+                        image = ""
+                    if not image:
+                        # One retry after a short wait — lazy images often arrive late
+                        try:
+                            await card.scroll_into_view_if_needed(timeout=1500)
+                            await asyncio.sleep(0.55)
+                        except Exception:
+                            pass
+                        image = await _review_delivery_image(card, reject_image_urls)
+                        if image and not is_valid_review_image(image):
+                            image = ""
+                    if not image:
+                        # Page JSON often has attachment URLs even when DOM thumbs are lazy
+                        image = _image_from_json_reviews(reviewer, text, json_reviews)
+                        if image and _strip_image_url(image) in reject_image_urls:
+                            image = ""
+                        if image and not is_valid_review_image(image):
+                            image = ""
+                    if not image:
+                        # Don't mark permanently if image missing — allow re-try if
+                        # the same card reappears after further expand/scroll.
+                        processed_card_fps.discard(fp)
+                        _note_skip("image", reviewer)
+                        _push_live_scan(
+                            force=True,
+                            last_label=f"noImage:{reviewer}",
+                            last_country=norm,
+                        )
+                        continue
+
+                review_date = await _review_date(card, card_text)
+                seen_keys.add(key)
+                seen_text_keys.add(text_key)
+                _push_live_scan(force=True, last_label=reviewer, last_country=norm)
+
+                append_activity(
+                    job_id,
+                    f"Reviewer extracted: {reviewer} | country={norm} | rating={rating} | page={review_page}",
+                )
+                review_row = {
+                    "reviewerName": reviewer,
+                    "reviewerCountry": norm,
+                    "reviewText": text,
+                    "reviewRating": rating,
+                    "reviewDate": review_date,
+                    "reviewedImageLink": image if with_images else "",
+                    "cardText": card_text,
+                    "reviewPage": review_page,
+                }
+                parsed.append(review_row)
+                if not _emit(review_row):
+                    break
+
+                if not unlimited and len(parsed) >= max_reviews:
+                    break
+            except VerificationRequiredError:
+                raise
+            except Exception:
+                _note_skip("other", "stale-card")
                 continue
-            seen_keys.add(key)
-            seen_text_keys.add(text_key)
-
-            append_activity(
-                job_id,
-                f"Reviewer extracted: {reviewer} | country={norm} | rating={rating} | page={review_page}",
-            )
-            review_row = {
-                "reviewerName": reviewer,
-                "reviewerCountry": norm,
-                "reviewText": text,
-                "reviewRating": rating,
-                "reviewDate": review_date,
-                "reviewedImageLink": image if with_images else "",
-                "cardText": card_text,
-                "reviewPage": review_page,
-            }
-            parsed.append(review_row)
-            if not _emit(review_row):
-                break
-
-            if not unlimited and len(parsed) >= max_reviews:
-                break
 
         kept_on_page = len(parsed) - kept_before_page
+        new_unique = len(seen_keys) - new_keys_before
+        covered = (
+            listed_review_count > 0 and checked >= listed_coverage_target
+        )
         update_job(
             job_id,
             {
                 "currentReviewPage": review_page,
                 "totalReviewsParsed": progress_base + checked,
+                "reviewsChecked": progress_base + checked,
+                "listedReviewCount": listed_review_count or None,
             },
+        )
+        coverage_note = (
+            f"; scanned {checked}/{listed_review_count} listed"
+            if listed_review_count > 0
+            else f"; scanned={checked}"
         )
         append_activity(
             job_id,
-            f"Review page {review_page}: kept {kept_on_page} US/CA review(s); total kept {len(parsed)}",
+            f"Review page {review_page}: kept {kept_on_page} US/CA "
+            f"(+{new_unique} new keys, +{new_card_fps} new cards); total kept {len(parsed)}; "
+            f"DOM cards={len(candidates)}{coverage_note}",
         )
 
         if stop_requested or (not unlimited and len(parsed) >= max_reviews):
             break
+
+        # Listed total reached — finish once expand also stops producing cards
+        if covered and new_card_fps == 0 and new_unique == 0:
+            append_activity(
+                job_id,
+                f"Reached listed review count (~{listed_review_count:,}): "
+                f"scanned {checked}, kept {len(parsed)} targeted US/CA",
+            )
+            break
+
+        # Never dismiss verification / reviews dialogs here — only image galleries
         await _close_open_dialogs(page)
+        await _raise_if_verification(
+            page, thorough=True, job_id=job_id, return_url=return_url or None
+        )
+
+        # Progress = new card content seen this round (not only kept US/CA+image).
+        # Stopping on zero kept was quitting while Show More still had more reviews.
+        if new_card_fps > 0 or new_unique > 0:
+            stagnant_rounds = 0
+        else:
+            stagnant_rounds += 1
+        if signature:
+            seen_page_signatures.add(signature)
 
         advanced = await click_next_review_page(page, review_page)
         if advanced:
+            stagnant_rounds = 0
             review_page += 1
-            await scroll_to_reviews(page)
             continue
 
-        # Retry once after scrolling deeper — pagination can render late
-        if review_page <= 2:
-            try:
-                await page.mouse.wheel(0, 1200)
-                await asyncio.sleep(0.6)
-            except Exception:
-                pass
-            advanced = await click_next_review_page(page, review_page)
-            if advanced:
-                review_page += 1
-                await scroll_to_reviews(page)
-                continue
-
-        # Many large gigs use "Show More Reviews" instead of page numbers
-        before_count = len(candidates)
-        more = await click_load_more(
-            page, max_clicks=min(25, max(1, config.REVIEW_LOAD_MORE_MAX))
+        # Small expand AFTER scan so replaced cards were already harvested
+        load_clicks = await click_load_more(
+            page, max_clicks=burst, job_id=job_id, return_url=return_url or None
         )
-        total_load_clicks += more
-        if more > 0:
+        total_load_clicks += load_clicks
+        if load_clicks > 0:
             append_activity(
                 job_id,
-                f"No page buttons — expanded via Show More Reviews "
-                f"(+{more} clicks, was {before_count} cards)",
+                f"Show More +{load_clicks} (total clicks={total_load_clicks}) — "
+                f"will scan new cards next"
+                + (
+                    f" ({checked}/{listed_review_count} listed)"
+                    if listed_review_count > 0
+                    else ""
+                ),
             )
-            seen_page_signatures.clear()
+            # Expanding means more reviews may appear — never treat as stagnant end
+            stagnant_rounds = 0
             review_page += 1
             continue
 
-        # Last resort: scroll/lazy-load
+        before_count = len(candidates)
         scroll_rounds = await scroll_load_more_reviews(
-            page, max_rounds=min(15, config.REVIEW_SCROLL_LOAD_MAX)
+            page, max_rounds=min(8, config.REVIEW_SCROLL_LOAD_MAX)
         )
         after_cards = await _collect_review_cards(page)
-        if scroll_rounds > 0 and len(after_cards) > before_count:
+        after_new = sum(
+            1 for _c, t in after_cards if _card_fp(t) not in processed_card_fps
+        )
+        if scroll_rounds > 0 and (len(after_cards) > before_count or after_new > 0):
             append_activity(
                 job_id,
                 f"Scroll-loaded more reviews "
-                f"({scroll_rounds} rounds, {before_count}→{len(after_cards)} cards)",
+                f"({scroll_rounds} rounds, {before_count}→{len(after_cards)} cards, "
+                f"unseen≈{after_new})",
             )
-            seen_page_signatures.clear()
             review_page += 1
+            stagnant_rounds = 0
             continue
 
-        append_activity(
-            job_id,
-            f"Review pagination ended after page {review_page} "
-            f"(no next page / show-more control)",
-        )
-        break
+        # Only stop when expand/scroll cannot surface new card content.
+        # If we still haven't covered the listed total, keep trying a bit longer.
+        stagnant_limit = 8 if (
+            listed_review_count > 0 and checked < listed_coverage_target
+        ) else 5
+        if stagnant_rounds >= stagnant_limit:
+            append_activity(
+                job_id,
+                f"Review pagination ended after page {review_page} "
+                f"(no new review cards for {stagnant_rounds} rounds; "
+                f"clicks={total_load_clicks}"
+                + (
+                    f"; covered {checked}/{listed_review_count} listed"
+                    if listed_review_count > 0
+                    else ""
+                )
+                + ")",
+            )
+            break
+        review_page += 1
 
     if not unlimited:
         parsed = parsed[:max_reviews]
 
     append_activity(
         job_id,
-        f"Reviews on gig: {len(parsed)} US/CA ({checked} reviews scanned, review pages={review_page}, imageMode={review_image_mode})",
+        f"Reviews on gig: {len(parsed)} US/CA ({checked} reviews scanned"
+        + (f" of ~{listed_review_count:,} listed" if listed_review_count > 0 else "")
+        + f", review pages={review_page}, imageMode={review_image_mode})",
     )
     print(
         f"[reviews] {len(parsed)} US/CA leads ({review_image_mode}) "
-        f"({checked} cards checked, pages={review_page}, load-more={total_load_clicks})"
+        f"({checked} cards checked"
+        + (f"/{listed_review_count} listed" if listed_review_count > 0 else "")
+        + f", pages={review_page}, load-more={total_load_clicks})"
     )
     return parsed, checked

@@ -58,18 +58,64 @@ def failed_urls_col() -> Collection:
 
 
 def reset_stale_running_jobs() -> int:
-    """Jobs left 'running' after a crash are reset to pending."""
-    cutoff = now_utc() - timedelta(minutes=config.STALE_RUNNING_MINUTES)
-    result = jobs_col().update_many(
-        {"status": "running", "updatedAt": {"$lt": cutoff}},
-        {"$set": {"status": "pending", "updatedAt": now_utc()}},
+    """
+    Jobs left mid-flight after a crash/scraper restart are reset to pending.
+    verification_required uses a longer cutoff so a live wait loop is not stolen.
+    """
+    now = now_utc()
+    cutoff = now - timedelta(minutes=config.STALE_RUNNING_MINUTES)
+    verif_cutoff = now - timedelta(
+        minutes=max(config.STALE_RUNNING_MINUTES + 2, config.VERIFICATION_TIMEOUT_SEC // 60 + 1)
     )
-    if result.modified_count:
-        print(f"[db] Reset {result.modified_count} stale running job(s) to pending")
-    return result.modified_count
+    total = 0
+    r1 = jobs_col().update_many(
+        {
+            "status": {"$in": ["running", "extracting_reviews", "discovering"]},
+            "updatedAt": {"$lt": cutoff},
+        },
+        {
+            "$set": {
+                "status": "pending",
+                "verificationMessage": "",
+                "updatedAt": now,
+            }
+        },
+    )
+    total += r1.modified_count
+    r2 = jobs_col().update_many(
+        {
+            "status": "verification_required",
+            "updatedAt": {"$lt": verif_cutoff},
+        },
+        {
+            "$set": {
+                "status": "pending",
+                "verificationMessage": "",
+                "updatedAt": now,
+            }
+        },
+    )
+    total += r2.modified_count
+    if total:
+        print(f"[db] Reset {total} stale in-progress job(s) to pending")
+    return total
 
 
-def set_heartbeat() -> None:
+_last_heartbeat_mono: float = 0.0
+
+
+def set_heartbeat(*, force: bool = False) -> None:
+    """
+    Touch the Python scraper heartbeat. Throttled to ~once per 15s unless force=True
+    so hot paths (live scan pushes) can call it freely without hammering Mongo.
+    """
+    global _last_heartbeat_mono
+    import time as _time
+
+    now = _time.monotonic()
+    if not force and _last_heartbeat_mono and (now - _last_heartbeat_mono) < 15.0:
+        return
+    _last_heartbeat_mono = now
     heartbeat_col().update_one(
         {"_id": config.HEARTBEAT_ID},
         {"$set": {"ts": now_utc(), "service": "python_scraper"}},
@@ -101,7 +147,8 @@ def append_activity(job_id: str, message: str) -> None:
     line = activity_line(message)
     jobs_col().update_one(
         {"_id": ObjectId(job_id)},
-        {"$push": {"activityLog": line}},
+        # Keep enough history for the Live Monitor (UI shows the tail)
+        {"$push": {"activityLog": {"$each": [line], "$slice": -200}}},
     )
     print(f"[job {job_id}] {message}")
 
@@ -263,10 +310,9 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         {"userId": job["userId"], "dedupeKey": dedupe_key},
     )
     if existing:
-        # Paste-links "extract again from start": refresh lead onto this job so results appear
+        # Paste-links "scrape fresh / ignore already-reviewed": always attach to
+        # this job and count as saved (even if the row already belonged here).
         if job.get("reextractFromStart"):
-            if existing.get("jobId") == job["_id"]:
-                return False, country, "duplicate"
             leads_col().update_one(
                 {"_id": existing["_id"]},
                 {
@@ -301,21 +347,34 @@ def save_lead_if_qualified(job: dict, gig: dict, review: dict) -> tuple[bool, st
         raise
 
 
-def refresh_job_counters(job_id: str, state: dict) -> None:
+def refresh_job_counters(
+    job_id: str,
+    state: dict,
+    *,
+    reviews_parsed: int | None = None,
+) -> None:
+    """
+    Push lead / progress counters to Mongo for the Live Monitor.
+
+    Do NOT overwrite totalReviewsParsed with a stale pre-gig reviews_checked —
+    that was resetting the UI to 0 while extraction was actively scanning.
+    """
     total = state["us_leads"] + state["canada_leads"]
     queue_len = max(len(state.get("gig_queue") or []), 1)
     idx = state.get("resume_index", 0)
-    update_job(
-        job_id,
-        {
-            "gigsScanned": state["gigs_scanned"],
-            "reviewsChecked": state["reviews_checked"],
-            "usLeadsFound": state["us_leads"],
-            "canadaLeadsFound": state["canada_leads"],
-            "totalLeadsFound": total,
-            "failedGigs": state["failed_gigs"],
-            "resumeIndex": idx,
-            "totalReviewsParsed": state["reviews_checked"],
-            "progressPercent": int((idx / queue_len) * 100),
-        },
-    )
+    fields: dict = {
+        "gigsScanned": state["gigs_scanned"],
+        "usLeadsFound": state["us_leads"],
+        "canadaLeadsFound": state["canada_leads"],
+        "totalLeadsFound": total,
+        "failedGigs": state["failed_gigs"],
+        "resumeIndex": idx,
+        "progressPercent": int((idx / queue_len) * 100),
+    }
+    if reviews_parsed is not None:
+        parsed = max(0, int(reviews_parsed))
+        fields["totalReviewsParsed"] = parsed
+        fields["reviewsChecked"] = max(int(state.get("reviews_checked") or 0), parsed)
+    # else: lead-only refresh — do NOT touch reviewsChecked / totalReviewsParsed
+    # (extract_reviews owns those live fields mid-gig)
+    update_job(job_id, fields)

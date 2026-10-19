@@ -21,15 +21,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
 
 os.environ["PLAYWRIGHT_HEADLESS"] = "false"
-os.environ.setdefault("REVIEW_MAX_PAGES", "12")
-os.environ.setdefault("REVIEW_SCROLL_LOAD_MAX", "10")
-os.environ.setdefault("REVIEW_LOAD_MORE_MAX", "40")
-os.environ.setdefault("PYTHON_VERIFICATION_TIMEOUT_SEC", "240")
+os.environ.setdefault("REVIEW_MAX_PAGES", "80")
+os.environ.setdefault("REVIEW_SCROLL_LOAD_MAX", "20")
+os.environ.setdefault("REVIEW_LOAD_MORE_MAX", "200")
+os.environ.setdefault("REVIEW_LOAD_MORE_BURST", "3")
+os.environ.setdefault("PYTHON_VERIFICATION_TIMEOUT_SEC", "300")
 
 import config
 
-# Force reload headless flag from env we just set
+# Force reload flags from env we just set
 config.PLAYWRIGHT_HEADLESS = False
+config.REVIEW_LOAD_MORE_BURST = int(os.environ.get("REVIEW_LOAD_MORE_BURST", "3"))
+config.REVIEW_LOAD_MORE_MAX = int(os.environ.get("REVIEW_LOAD_MORE_MAX", "200"))
+config.REVIEW_MAX_PAGES = int(os.environ.get("REVIEW_MAX_PAGES", "80"))
 
 from browser import get_work_page, kill_playwright_chrome_only, prepare_browser_profile, reset_browser
 from utils import (
@@ -47,8 +51,8 @@ GIG_URL = (
 )
 JOB_ID = "000000000000000000000001"
 OUT_DIR = Path(__file__).resolve().parent.parent / "tmp" / "live-gig-test"
-LOGIN_WAIT_SEC = 180
-MAX_LEADS = 30
+LOGIN_WAIT_SEC = 45
+MAX_LEADS = 80
 
 
 def _noop_activity(job_id: str, message: str) -> None:
@@ -227,7 +231,7 @@ async def run() -> int:
     patches = [
         patch("review_parser.append_activity", _noop_activity),
         patch("review_parser.update_job", _noop_update),
-        patch("review_parser.assert_page_accessible", _skip_assert),
+        # Keep real assert_page_accessible so popup Press & Hold is auto-cleared
         patch("verification.append_activity", _noop_activity),
         patch("verification.update_job", _noop_update),
         patch("verification.get_job", _noop_get_job),
@@ -270,20 +274,41 @@ async def run() -> int:
             f"load_more_max={config.REVIEW_LOAD_MORE_MAX})…",
             flush=True,
         )
+        lead_count = {"n": 0}
+
+        def _on_review_sync(review: dict) -> bool:
+            lead_count["n"] += 1
+            if lead_count["n"] in (1, 10, 25, 50):
+                print(
+                    f"[test] live lead #{lead_count['n']}: "
+                    f"{review.get('reviewerName')} ({review.get('reviewerCountry')})",
+                    flush=True,
+                )
+            return True
+
         reviews, checked = await extract_reviews(
             page,
             max_reviews=MAX_LEADS,
             job_id=JOB_ID,
             seller_username="hamzagraphics",
             review_image_mode="with_image",
+            gig_url=clean,
+            on_review=_on_review_sync,
         )
         await _shot(page, "05_after_extract")
+        # Capture final state + any leftover verification overlay
+        if await is_verification_page(page, thorough=True):
+            await _shot(page, "05b_verif_still_present")
+            print("[test] Verification still present after extract — clearing…", flush=True)
+            await wait_until_verification_clears(page, JOB_ID, clean)
+            await _shot(page, "05c_verif_cleared_final")
 
         print(
             f"\n[test] RESULT logged_in={logged_in} kept={len(reviews)} "
             f"US/CA+image leads, scanned={checked}",
             flush=True,
         )
+        print(f"[test] Screenshots dir: {OUT_DIR}", flush=True)
         for i, r in enumerate(reviews[:15], 1):
             print(
                 f"  lead#{i} {r.get('reviewerName')} | {r.get('reviewerCountry')} | "

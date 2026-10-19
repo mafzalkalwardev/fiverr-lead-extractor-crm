@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { CLIENT_MODE } from "@/lib/constants";
 
@@ -13,15 +13,37 @@ interface SystemStatus {
   configuredEngine?: string;
 }
 
+/** Consecutive offline polls before flipping green → amber (avoids mid-job flicker). */
+const OFFLINE_POLLS_BEFORE_BANNER = 3;
+
 export function WorkerStatusBanner() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [pythonStickyOk, setPythonStickyOk] = useState(false);
+  const offlineStreak = useRef(0);
 
   useEffect(() => {
     const load = () => {
       fetch("/api/system/status")
         .then((r) => r.json())
-        .then(setStatus)
-        .catch(() => setStatus(null));
+        .then((s: SystemStatus) => {
+          setStatus(s);
+          const online = Boolean(s.worker && s.scraperEngine === "python");
+          if (online) {
+            offlineStreak.current = 0;
+            setPythonStickyOk(true);
+          } else {
+            offlineStreak.current += 1;
+            if (offlineStreak.current >= OFFLINE_POLLS_BEFORE_BANNER) {
+              setPythonStickyOk(false);
+            }
+          }
+        })
+        .catch(() => {
+          offlineStreak.current += 1;
+          if (offlineStreak.current >= OFFLINE_POLLS_BEFORE_BANNER) {
+            setPythonStickyOk(false);
+          }
+        });
     };
     load();
     const t = setInterval(load, 5000);
@@ -32,7 +54,6 @@ export function WorkerStatusBanner() {
 
   const wrongEngine =
     status.configuredEngine === "python" && status.scraperEngine === "node";
-  const pythonOk = status.worker && status.scraperEngine === "python";
 
   if (wrongEngine) {
     return (
@@ -51,7 +72,7 @@ export function WorkerStatusBanner() {
     );
   }
 
-  if (pythonOk) {
+  if (pythonStickyOk) {
     return (
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-400">
         <CheckCircle2 className="h-4 w-4 shrink-0" />

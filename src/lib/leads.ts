@@ -108,10 +108,8 @@ export async function saveLeadIfQualified(
   }).lean();
 
   if (existing) {
+    // Paste-gig "scrape fresh": ignore already-reviewed duplicates — refresh onto this job
     if (input.reextractFromStart) {
-      if (String(existing.jobId) === String(input.jobId)) {
-        return { saved: false, country, reason: "duplicate" };
-      }
       await Lead.updateOne(
         { _id: existing._id },
         {

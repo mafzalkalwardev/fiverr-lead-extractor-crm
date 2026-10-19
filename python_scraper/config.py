@@ -10,12 +10,21 @@ load_dotenv(ROOT_DIR / ".env")
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017/fiverr-lead-extractor-crm")
 POLL_INTERVAL_SEC = float(os.getenv("PYTHON_SCRAPER_POLL_SEC", "1.5"))
 BLOCK_HEAVY_RESOURCES = os.getenv("BLOCK_HEAVY_RESOURCES", "true").lower() == "true"
-REVIEW_LOAD_MORE_MAX = int(os.getenv("REVIEW_LOAD_MORE_MAX", "120"))
+# ~5 cards/click on large gigs; 400 clicks ≈ 2000 reviews before needing another pass
+REVIEW_LOAD_MORE_MAX = int(os.getenv("REVIEW_LOAD_MORE_MAX", "400"))
+# Keep small: Fiverr replaces DOM cards; scanning must happen between expands
+REVIEW_LOAD_MORE_BURST = int(os.getenv("REVIEW_LOAD_MORE_BURST", "3"))
+REVIEW_CARD_SCAN_MAX = int(os.getenv("REVIEW_CARD_SCAN_MAX", "5000"))
+# How often to re-check Press & Hold while scanning cards (higher = fewer pauses)
+REVIEW_VERIF_CHECK_EVERY = int(os.getenv("REVIEW_VERIF_CHECK_EVERY", "12"))
+# Live Monitor: push scan counter to Mongo at least this often while walking cards
+REVIEW_LIVE_PUSH_EVERY = int(os.getenv("REVIEW_LIVE_PUSH_EVERY", "1"))
+REVIEW_LIVE_PUSH_MIN_SEC = float(os.getenv("REVIEW_LIVE_PUSH_MIN_SEC", "0.35"))
 GIG_PAGE_WAIT_SEC = float(os.getenv("GIG_PAGE_WAIT_SEC", "1"))
 DISCOVERY_SCROLL_LOOPS = int(os.getenv("DISCOVERY_SCROLL_LOOPS", "4"))
 DISCOVERY_PAGE_WAIT_SEC = float(os.getenv("DISCOVERY_PAGE_WAIT_SEC", "1.5"))
 VERIFICATION_POLL_SEC = float(os.getenv("PYTHON_VERIFICATION_POLL_SEC", "2"))
-VERIFICATION_TIMEOUT_SEC = int(os.getenv("PYTHON_VERIFICATION_TIMEOUT_SEC", "600"))
+VERIFICATION_TIMEOUT_SEC = int(os.getenv("PYTHON_VERIFICATION_TIMEOUT_SEC", "300"))
 
 PLAYWRIGHT_HEADLESS = os.getenv("PLAYWRIGHT_HEADLESS", "false").lower() == "true"
 KEEP_BROWSER_PROFILE = os.getenv("KEEP_BROWSER_PROFILE", "true").lower() == "true"
@@ -58,16 +67,17 @@ STALE_RUNNING_MINUTES = int(os.getenv("PYTHON_STALE_JOB_MINUTES", "2"))
 # 0 = paginate through all search result pages (until last page / safety cap)
 MAX_SEARCH_PAGES = int(os.getenv("MAX_PAGES_LIMIT", "0"))
 MAX_SEARCH_PAGES_SAFETY = int(os.getenv("MAX_SEARCH_PAGES_SAFETY", "100"))
-PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "8"))
+PRESS_HOLD_SECONDS = float(os.getenv("PYTHON_PRESS_HOLD_SECONDS", "6"))
 # Page-scoped Playwright mouse only. OS-level mouse automation stays off unless
 # ALLOW_OS_MOUSE_AUTOMATION is explicitly enabled below.
-AUTO_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS", "8"))
-AUTO_VERIFICATION_RECHECK_SEC = float(os.getenv("PYTHON_AUTO_VERIFICATION_RECHECK_SEC", "2"))
+AUTO_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PYTHON_AUTO_VERIFICATION_MAX_ATTEMPTS", "10"))
+AUTO_VERIFICATION_RECHECK_SEC = float(os.getenv("PYTHON_AUTO_VERIFICATION_RECHECK_SEC", "1.2"))
 AUTO_VERIFICATION_RETRY_INTERVAL_SEC = float(
-    os.getenv("PYTHON_AUTO_VERIFICATION_RETRY_INTERVAL_SEC", "10")
+    os.getenv("PYTHON_AUTO_VERIFICATION_RETRY_INTERVAL_SEC", "5")
 )
 # Large gigs can have thousands of reviews (~5–10 per page) — keep this high
-REVIEW_MAX_PAGES = int(os.getenv("REVIEW_MAX_PAGES", "600"))
+REVIEW_MAX_PAGES = int(os.getenv("REVIEW_MAX_PAGES", "800"))
+REVIEW_SKIP_LOG_EVERY = int(os.getenv("REVIEW_SKIP_LOG_EVERY", "25"))
 MAX_FAILED_URL_RETRY_PASSES = int(os.getenv("MAX_FAILED_URL_RETRY_PASSES", "1"))
 # Scroll-load fallback when Fiverr shows infinite scroll instead of page buttons
 REVIEW_SCROLL_LOAD_MAX = int(os.getenv("REVIEW_SCROLL_LOAD_MAX", "100"))

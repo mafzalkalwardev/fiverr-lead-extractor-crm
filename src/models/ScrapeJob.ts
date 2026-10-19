@@ -35,6 +35,10 @@ export interface IScrapeJob extends Document {
   totalGigs: number;
   currentReviewPage: number;
   totalReviewsParsed: number;
+  /** Review count shown on the gig header (scan target) */
+  listedReviewCount?: number;
+  lastScannedReview?: string;
+  lastScannedCountry?: string;
   gigsScanned: number;
   reviewsChecked: number;
   usLeadsFound: number;
@@ -115,6 +119,9 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     totalGigs: { type: Number, default: 0 },
     currentReviewPage: { type: Number, default: 0 },
     totalReviewsParsed: { type: Number, default: 0 },
+    listedReviewCount: { type: Number, default: 0 },
+    lastScannedReview: { type: String, default: "" },
+    lastScannedCountry: { type: String, default: "" },
     gigsScanned: { type: Number, default: 0 },
     reviewsChecked: { type: Number, default: 0 },
     usLeadsFound: { type: Number, default: 0 },

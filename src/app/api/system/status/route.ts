@@ -6,7 +6,8 @@ import { getScraperEngine } from "@/lib/scraper-engine";
 import { getScraperMode } from "@/lib/scraper-mode";
 
 const PYTHON_HEARTBEAT_ID = "python_scraper";
-const HEARTBEAT_MAX_AGE_MS = 75_000;
+/** Allow gaps during long Playwright card walks; keeper refreshes ~every 20s. */
+const HEARTBEAT_MAX_AGE_MS = 180_000;
 
 type HeartbeatDoc = {
   _id: string;

@@ -39,17 +39,33 @@ def username_from_url(value: str) -> str:
 
 
 async def open_gig_page(page: Page, url: str, job_id: str) -> str:
+    from verification import is_off_gig_listing_url, urls_match_same_gig
+
     target = normalize_fiverr_url(url)
     if not target:
         raise ValueError(f"Invalid Fiverr gig URL: {url}")
-    print(f"[gig] Opening: {target}")
+    # Skip reload when already on this gig (verification resume / paste-link continue)
+    already = False
     try:
-        await page.goto(target, wait_until="domcontentloaded", timeout=60_000)
-    except Exception as nav_err:
-        if "timeout" in str(nav_err).lower():
-            raise TimeoutError(f"Gig page did not load within 60s (network timeout): {target}") from nav_err
-        raise
-    await asyncio.sleep(config.GIG_PAGE_WAIT_SEC)
+        already = (
+            urls_match_same_gig(page.url, target)
+            and not is_off_gig_listing_url(page.url)
+        )
+    except Exception:
+        already = False
+    if already:
+        print(f"[gig] Already on target gig — skipping reload: {target}")
+    else:
+        print(f"[gig] Opening: {target}")
+        try:
+            await page.goto(target, wait_until="domcontentloaded", timeout=60_000)
+        except Exception as nav_err:
+            if "timeout" in str(nav_err).lower():
+                raise TimeoutError(
+                    f"Gig page did not load within 60s (network timeout): {target}"
+                ) from nav_err
+            raise
+        await asyncio.sleep(config.GIG_PAGE_WAIT_SEC)
     await assert_page_accessible(page, job_id, target)
     try:
         await page.wait_for_load_state("networkidle", timeout=8_000)
@@ -176,6 +192,22 @@ async def extract_gig_metadata(page: Page, gig_url: str, job_id: str) -> dict:
 
     main_image = await _main_gig_image(page, final_url)
 
+    listed_reviews = 0
+    try:
+        from review_parser import read_listed_review_count
+
+        listed_reviews = await read_listed_review_count(page)
+    except Exception:
+        listed_reviews = 0
+    if listed_reviews > 0:
+        print(f"[gig] Listed review count: {listed_reviews}")
+        try:
+            from db import append_activity
+
+            append_activity(job_id, f"Seller/gig header shows ~{listed_reviews:,} reviews")
+        except Exception:
+            pass
+
     return {
         "gigUrl": final_url,
         "gigTitle": gig_title,
@@ -183,4 +215,5 @@ async def extract_gig_metadata(page: Page, gig_url: str, job_id: str) -> dict:
         "sellerDisplayName": seller_display,
         "sellerUsername": seller_username,
         "mainGigImage": main_image,
+        "listedReviewCount": listed_reviews or None,
     }

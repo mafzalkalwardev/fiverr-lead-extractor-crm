@@ -389,11 +389,13 @@ export default function NewJobPage() {
                     }}
                   />
                   <span>
-                    <span className="font-medium">Extract again from start</span>
+                    <span className="font-medium">
+                      Scrape all leads fresh (ignore already-reviewed duplicates)
+                    </span>
                     <span className="mt-1 block text-xs text-muted-foreground">
-                      Re-open each pasted gig and extract all matching reviews from the beginning.
-                      Results are attached to this job (existing duplicate reviews are refreshed, not
-                      double-counted as new unique rows).
+                      Re-open each pasted gig and extract every matching review from the start.
+                      Already-saved reviews are not skipped — they are refreshed onto this new job
+                      so you get a full scrape of all selected leads.
                     </span>
                   </span>
                 </label>

@@ -30,6 +30,9 @@ export interface ScrapeJob {
   totalGigs?: number;
   currentReviewPage?: number;
   totalReviewsParsed?: number;
+  listedReviewCount?: number;
+  lastScannedReview?: string;
+  lastScannedCountry?: string;
   gigsScanned: number;
   reviewsChecked: number;
   usLeadsFound: number;

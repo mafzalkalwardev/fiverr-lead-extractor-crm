@@ -27,12 +27,19 @@ from gig_parser import extract_gig_metadata, open_gig_page
 from page_data import enrich_gig_from_page_json
 from review_parser import extract_reviews
 from utils import (
+    clean_text,
     count_lead_bucket,
     normalize_fiverr_url,
     parse_rating_after_country,
     reviewer_name_before_country,
 )
-from verification import BlockedError, VerificationRequiredError, wait_until_verification_clears
+from verification import (
+    BlockedError,
+    VerificationRequiredError,
+    ensure_on_gig_url,
+    is_expected_resume_page,
+    wait_until_verification_clears,
+)
 
 
 def _initial_state(job: dict) -> dict:
@@ -320,214 +327,315 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                 },
             )
 
-            try:
-                if delay > 0:
-                    await asyncio.sleep(delay)
-                final_url = await open_gig_page(page, gig_url, job_id)
-                gig = await extract_gig_metadata(page, final_url, job_id)
-                gig = await enrich_gig_from_page_json(page, gig)
-                seller_label = (
-                    gig.get("sellerDisplayName")
-                    or gig.get("sellerName")
-                    or gig.get("sellerUsername")
-                    or ""
-                )
-                seller_username = gig.get("sellerUsername") or ""
-                update_job(
-                    job_id,
-                    {
-                        "currentSeller": seller_label,
-                        "currentSellerUsername": seller_username,
-                        "currentGigLink": gig.get("gigUrl") or final_url,
-                    },
-                )
-                append_activity(
-                    job_id,
-                    f"Seller extracted: name={seller_label} username={seller_username}",
-                )
-                # Reload limits before streaming saves so UI counters stay accurate
-                fresh_limits = get_job(job_id) or current
-                job = {
-                    **job,
-                    "maxTotalLeads": fresh_limits.get("maxTotalLeads", job.get("maxTotalLeads")),
-                    "reviewImageMode": fresh_limits.get(
-                        "reviewImageMode", job.get("reviewImageMode")
-                    ),
-                    "targetCountries": fresh_limits.get(
-                        "targetCountries", job.get("targetCountries")
-                    ),
-                }
-                max_leads_live = int(job.get("maxTotalLeads") or 100)
-                leads_before = state["us_leads"] + state["canada_leads"]
-                live_saved = 0
-                live_dupes = 0
-
-                def _on_review(review: dict) -> bool:
-                    nonlocal live_saved, live_dupes, job
-                    # Pick up mid-run cap changes
-                    latest = get_job(job_id) or job
-                    job = {
-                        **job,
-                        "maxTotalLeads": latest.get("maxTotalLeads", job.get("maxTotalLeads")),
-                        "reviewImageMode": latest.get(
-                            "reviewImageMode", job.get("reviewImageMode")
-                        ),
-                        "targetCountries": latest.get(
-                            "targetCountries", job.get("targetCountries")
-                        ),
-                        "reextractFromStart": latest.get(
-                            "reextractFromStart", job.get("reextractFromStart")
-                        ),
-                    }
-                    cap = int(job.get("maxTotalLeads") or max_leads_live)
-                    if state["us_leads"] + state["canada_leads"] >= cap:
-                        return False
-                    saved, country, reason = save_lead_if_qualified(job, gig, review)
-                    if saved:
-                        bucket = count_lead_bucket(country)
-                        if bucket == "us":
-                            state["us_leads"] += 1
-                        elif bucket == "canada":
-                            state["canada_leads"] += 1
-                        live_saved += 1
+            # Inner retry: after verification, stay on this gig (no full reopen / search bounce)
+            need_open = True
+            final_url = gig_url
+            gig: dict = {"gigUrl": gig_url}
+            seller_label = ""
+            seller_username = ""
+            verif_retries = 0
+            leave_gig_loop = False
+            while not leave_gig_loop:
+                try:
+                    if need_open:
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        final_url = await open_gig_page(page, gig_url, job_id)
+                        gig = await extract_gig_metadata(page, final_url, job_id)
+                        gig = await enrich_gig_from_page_json(page, gig)
+                        need_open = False
+                        seller_label = (
+                            gig.get("sellerDisplayName")
+                            or gig.get("sellerName")
+                            or gig.get("sellerUsername")
+                            or ""
+                        )
+                        seller_username = gig.get("sellerUsername") or ""
+                        update_job(
+                            job_id,
+                            {
+                                "currentSeller": seller_label,
+                                "currentSellerUsername": seller_username,
+                                "currentGigLink": gig.get("gigUrl") or final_url,
+                            },
+                        )
                         append_activity(
                             job_id,
-                            f"Lead saved: {review.get('reviewerName', '')} ({country})",
+                            f"Seller extracted: name={seller_label} username={seller_username}",
                         )
-                        refresh_job_counters(job_id, state)
+
+                    fresh_limits = get_job(job_id) or current
+                    job = {
+                        **job,
+                        "maxTotalLeads": fresh_limits.get(
+                            "maxTotalLeads", job.get("maxTotalLeads")
+                        ),
+                        "reviewImageMode": fresh_limits.get(
+                            "reviewImageMode", job.get("reviewImageMode")
+                        ),
+                        "targetCountries": fresh_limits.get(
+                            "targetCountries", job.get("targetCountries")
+                        ),
+                    }
+                    max_leads_live = int(job.get("maxTotalLeads") or 100)
+                    leads_before = state["us_leads"] + state["canada_leads"]
+                    live_saved = 0
+                    live_dupes = 0
+
+                    def _on_review(review: dict) -> bool:
+                        nonlocal live_saved, live_dupes, job
+                        latest = get_job(job_id) or job
+                        job = {
+                            **job,
+                            "maxTotalLeads": latest.get(
+                                "maxTotalLeads", job.get("maxTotalLeads")
+                            ),
+                            "reviewImageMode": latest.get(
+                                "reviewImageMode", job.get("reviewImageMode")
+                            ),
+                            "targetCountries": latest.get(
+                                "targetCountries", job.get("targetCountries")
+                            ),
+                            "reextractFromStart": latest.get(
+                                "reextractFromStart", job.get("reextractFromStart")
+                            ),
+                        }
+                        cap = int(job.get("maxTotalLeads") or max_leads_live)
                         if state["us_leads"] + state["canada_leads"] >= cap:
+                            return False
+                        saved, country, reason = save_lead_if_qualified(job, gig, review)
+                        if saved:
+                            bucket = count_lead_bucket(country)
+                            if bucket == "us":
+                                state["us_leads"] += 1
+                            elif bucket == "canada":
+                                state["canada_leads"] += 1
+                            live_saved += 1
                             append_activity(
                                 job_id,
-                                f"Lead limit reached ({cap}) — stopping review extraction",
+                                f"Lead saved: {review.get('reviewerName', '')} ({country})",
                             )
-                            return False
-                    elif reason == "duplicate":
-                        live_dupes += 1
-                    return True
+                            # Lead counts only — never reset live reviewsParsed here
+                            refresh_job_counters(job_id, state)
+                            if state["us_leads"] + state["canada_leads"] >= cap:
+                                append_activity(
+                                    job_id,
+                                    f"Lead limit reached ({cap}) — stopping review extraction",
+                                )
+                                return False
+                        elif reason == "duplicate":
+                            live_dupes += 1
+                            # Card recognized (already in DB) — show name so UI doesn't look stuck
+                            rn = clean_text(review.get("reviewerName") or "")
+                            if rn:
+                                try:
+                                    update_job(
+                                        job_id,
+                                        {
+                                            "lastScannedReview": f"saved:{rn}"[:80],
+                                            "lastScannedCountry": (country or "")[:40],
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+                        return True
 
-                reviews, checked = await extract_reviews(
-                    page,
-                    max_reviews,
-                    job_id,
-                    seller_username,
-                    progress_base=state["reviews_checked"],
-                    review_image_mode=image_mode,
-                    main_gig_image=gig.get("mainGigImage") or "",
-                    on_review=_on_review,
-                )
+                    reviews, checked = await extract_reviews(
+                        page,
+                        max_reviews,
+                        job_id,
+                        seller_username,
+                        progress_base=state["reviews_checked"],
+                        review_image_mode=image_mode,
+                        main_gig_image=gig.get("mainGigImage") or "",
+                        on_review=_on_review,
+                        gig_url=gig.get("gigUrl") or final_url or gig_url,
+                    )
 
-                state["gigs_scanned"] += 1
-                state["reviews_checked"] += checked
-                # Reviews already streamed to DB; reconcile any leftovers / duplicates
-                save_result = await _save_reviews(job, job_id, gig, reviews, state)
-                if live_saved:
+                    state["gigs_scanned"] += 1
+                    state["reviews_checked"] += checked
+                    # Live path already persisted qualifying leads — avoid duplicate spam
+                    if live_saved > 0:
+                        save_result = {
+                            "saved": live_saved,
+                            "duplicates": live_dupes,
+                            "hit_lead_limit": (
+                                state["us_leads"] + state["canada_leads"]
+                                >= int(job.get("maxTotalLeads") or max_leads_live)
+                            ),
+                            "remaining_reviews": 0,
+                        }
+                        append_activity(
+                            job_id,
+                            f"Live-saved {live_saved} lead(s) during extraction "
+                            f"(duplicates during live pass: {live_dupes})",
+                        )
+                    else:
+                        save_result = await _save_reviews(
+                            job, job_id, gig, reviews, state
+                        )
+                    refresh_job_counters(
+                        job_id, state, reviews_parsed=state["reviews_checked"]
+                    )
+                    leads_after = state["us_leads"] + state["canada_leads"]
                     append_activity(
                         job_id,
-                        f"Live-saved {live_saved} lead(s) during extraction "
-                        f"(duplicates during live pass: {live_dupes})",
+                        f"Gig {i + 1}/{len(queue)}: seller={seller_label}; "
+                        f"{len(reviews)} qualified reviews; {checked} reviews scanned; "
+                        f"saved={save_result['saved']}; duplicates={save_result['duplicates']}",
                     )
-                leads_after = state["us_leads"] + state["canada_leads"]
-                append_activity(
-                    job_id,
-                    f"Gig {i + 1}/{len(queue)}: seller={seller_label}; "
-                    f"{len(reviews)} qualified reviews; {checked} reviews scanned; "
-                    f"saved={save_result['saved']}; duplicates={save_result['duplicates']}",
-                )
-                append_activity(job_id, f"Leads saved for gig: {leads_after - leads_before}")
-                clear_failed_url(job_id, gig_url)
-
-                if save_result["hit_lead_limit"]:
-                    # Stay on this gig — more country-matching reviews remain
-                    state["resume_index"] = i
-                    stopped_reason = "lead_limit"
-                    refresh_job_counters(job_id, state)
                     append_activity(
-                        job_id,
-                        f"Lead limit reached mid-gig. {save_result['remaining_reviews']} review(s) "
-                        f"still pending on this gig — will continue here after you raise max leads.",
+                        job_id, f"Leads saved for gig: {leads_after - leads_before}"
                     )
-                    break
+                    clear_failed_url(job_id, gig_url)
 
-                state["resume_index"] = i + 1
-                refresh_job_counters(job_id, state)
+                    if save_result["hit_lead_limit"]:
+                        state["resume_index"] = i
+                        stopped_reason = "lead_limit"
+                        refresh_job_counters(job_id, state)
+                        append_activity(
+                            job_id,
+                            f"Lead limit reached mid-gig. {save_result['remaining_reviews']} review(s) "
+                            f"still pending on this gig — will continue here after you raise max leads.",
+                        )
+                        leave_gig_loop = True
+                        break
 
-            except VerificationRequiredError as err:
-                if getattr(err, "timed_out", False):
-                    state["failed_gigs"] += 1
-                    err_msg = str(err).encode("ascii", errors="replace").decode("ascii")
-                    artifacts = await _save_failure_artifacts(page, job_id, gig_url)
-                    artifact_msg = f" {artifacts}" if artifacts else ""
-                    reason = f"{err_msg}{artifact_msg}"
-                    push_error(job_id, f"{gig_url}: {reason}")
-                    record_failed_url(job_id, gig_url, reason)
-                    state.setdefault("failed_urls", []).append(gig_url)
-                    append_activity(
-                        job_id,
-                        f"Verification timed out for gig; saved artifacts and continuing: {gig_url}",
-                    )
-                    update_job(
-                        job_id,
-                        {
-                            "status": "extracting_reviews",
-                            "verificationMessage": "",
-                            "resumeIndex": i + 1,
-                            "gigQueue": queue,
-                        },
-                    )
                     state["resume_index"] = i + 1
                     refresh_job_counters(job_id, state)
-                    continue
+                    leave_gig_loop = True
 
-                update_job(
-                    job_id,
-                    {
-                        "status": "verification_required",
-                        "verificationMessage": config.VERIFICATION_MESSAGE,
-                        "resumeIndex": i,
-                        "gigQueue": queue,
-                    },
-                )
-                cleared = await wait_until_verification_clears(page, job_id, gig_url)
-                if cleared:
-                    state["resume_index"] = i
-                    return await process_gig_list(job, job_id, state, retry_pass)
-                return "verification_required"
+                except VerificationRequiredError as err:
+                    if getattr(err, "timed_out", False):
+                        state["failed_gigs"] += 1
+                        err_msg = str(err).encode("ascii", errors="replace").decode("ascii")
+                        artifacts = await _save_failure_artifacts(page, job_id, gig_url)
+                        artifact_msg = f" {artifacts}" if artifacts else ""
+                        reason = f"{err_msg}{artifact_msg}"
+                        push_error(job_id, f"{gig_url}: {reason}")
+                        record_failed_url(job_id, gig_url, reason)
+                        state.setdefault("failed_urls", []).append(gig_url)
+                        append_activity(
+                            job_id,
+                            f"Verification timed out for gig; saved artifacts and continuing: {gig_url}",
+                        )
+                        update_job(
+                            job_id,
+                            {
+                                "status": "extracting_reviews",
+                                "verificationMessage": "",
+                                "resumeIndex": i + 1,
+                                "gigQueue": queue,
+                            },
+                        )
+                        state["resume_index"] = i + 1
+                        refresh_job_counters(job_id, state)
+                        leave_gig_loop = True
+                        continue
 
-            except BlockedError as err:
-                push_error(job_id, str(err))
-                update_job(job_id, {"status": "blocked", "currentGigLink": gig_url})
-                return "blocked"
-
-            except Exception as err:
-                if is_browser_closed_error(err):
-                    await reset_browser()
                     update_job(
                         job_id,
                         {
                             "status": "verification_required",
                             "verificationMessage": config.VERIFICATION_MESSAGE,
                             "resumeIndex": i,
+                            "gigQueue": queue,
                         },
                     )
-                    append_activity(job_id, "Browser closed — reopening on next poll. Keep Chrome open.")
-                    return "verification_required"
-                state["failed_gigs"] += 1
-                err_str = str(err)
-                if "timeout" in err_str.lower() and ("60s" in err_str or "page.goto" in err_str or "TimeoutError" in type(err).__name__):
-                    err_msg = f"Gig page load timed out (network too slow); saved for retry"
-                else:
-                    err_msg = err_str.encode("ascii", errors="replace").decode("ascii")
-                artifacts = await _save_failure_artifacts(page, job_id, gig_url)
-                artifact_msg = f" {artifacts}" if artifacts else ""
-                push_error(job_id, f"{gig_url}: {err_msg}{artifact_msg}")
-                record_failed_url(job_id, gig_url, f"{err_msg}{artifact_msg}")
-                state.setdefault("failed_urls", []).append(gig_url)
-                append_activity(
-                    job_id,
-                    f"Failed gig saved for retry: {gig_url} reason={err_msg}",
-                )
-                append_activity(job_id, f"Selector failure artifacts saved:{artifact_msg}" if artifact_msg else "Selector failure artifact save skipped")
-                refresh_job_counters(job_id, state)
+                    cleared = await wait_until_verification_clears(page, job_id, gig_url)
+                    if not cleared:
+                        return "verification_required"
+                    state["resume_index"] = i
+                    verif_retries += 1
+                    if verif_retries > 8:
+                        append_activity(
+                            job_id,
+                            "Too many verification loops on this gig — skipping to next",
+                        )
+                        state["resume_index"] = i + 1
+                        leave_gig_loop = True
+                        continue
+                    still_on_gig = False
+                    try:
+                        still_on_gig = await is_expected_resume_page(page, gig_url)
+                    except Exception:
+                        still_on_gig = False
+                    if still_on_gig:
+                        need_open = False
+                        append_activity(
+                            job_id,
+                            "Verification cleared — still on gig, continuing without reload",
+                        )
+                    else:
+                        await ensure_on_gig_url(page, gig_url, job_id)
+                        need_open = True
+                        append_activity(
+                            job_id,
+                            "Verification cleared — restored gig URL, continuing same gig",
+                        )
+                    update_job(
+                        job_id,
+                        {
+                            "status": "extracting_reviews",
+                            "verificationMessage": "",
+                            "resumeIndex": i,
+                        },
+                    )
+                    continue
+
+                except BlockedError as err:
+                    push_error(job_id, str(err))
+                    update_job(job_id, {"status": "blocked", "currentGigLink": gig_url})
+                    return "blocked"
+
+                except Exception as err:
+                    if is_browser_closed_error(err):
+                        await reset_browser()
+                        update_job(
+                            job_id,
+                            {
+                                "status": "verification_required",
+                                "verificationMessage": config.VERIFICATION_MESSAGE,
+                                "resumeIndex": i,
+                            },
+                        )
+                        append_activity(
+                            job_id,
+                            "Browser closed — reopening on next poll. Keep Chrome open.",
+                        )
+                        return "verification_required"
+                    state["failed_gigs"] += 1
+                    err_str = str(err)
+                    if "timeout" in err_str.lower() and (
+                        "60s" in err_str
+                        or "page.goto" in err_str
+                        or "TimeoutError" in type(err).__name__
+                    ):
+                        err_msg = (
+                            "Gig page load timed out (network too slow); saved for retry"
+                        )
+                    else:
+                        err_msg = err_str.encode("ascii", errors="replace").decode("ascii")
+                    artifacts = await _save_failure_artifacts(page, job_id, gig_url)
+                    artifact_msg = f" {artifacts}" if artifacts else ""
+                    push_error(job_id, f"{gig_url}: {err_msg}{artifact_msg}")
+                    record_failed_url(job_id, gig_url, f"{err_msg}{artifact_msg}")
+                    state.setdefault("failed_urls", []).append(gig_url)
+                    append_activity(
+                        job_id,
+                        f"Failed gig saved for retry: {gig_url} reason={err_msg}",
+                    )
+                    append_activity(
+                        job_id,
+                        f"Selector failure artifacts saved:{artifact_msg}"
+                        if artifact_msg
+                        else "Selector failure artifact save skipped",
+                    )
+                    refresh_job_counters(job_id, state)
+                    leave_gig_loop = True
+
+            if stopped_reason == "lead_limit":
+                break
 
     failed_urls = list(dict.fromkeys(state.get("failed_urls") or []))
     if (
@@ -701,6 +809,17 @@ async def process_job(job: dict) -> None:
     update_job(job_id, {"status": "running", "verificationMessage": ""})
     append_activity(job_id, "Opening Fiverr scraper browser (one window for this job)")
 
+    # Keep Live Monitor "Python scraper active" stable for the whole job —
+    # poll_loop only heartbeats between jobs, which caused offline flicker mid-extract.
+    async def _heartbeat_keeper() -> None:
+        while True:
+            try:
+                set_heartbeat(force=True)
+            except Exception:
+                pass
+            await asyncio.sleep(20)
+
+    hb_task = asyncio.create_task(_heartbeat_keeper())
     try:
         if mode == "html_import":
             await process_html_import(job, job_id, state)
@@ -714,7 +833,8 @@ async def process_job(job: dict) -> None:
                 state["resume_index"] = 0
                 append_activity(
                     job_id,
-                    f"Re-extract from start — {len(queue)} pasted gig(s), scraping each gig fully again",
+                    f"Fresh scrape (ignore already-reviewed) — {len(queue)} pasted gig(s); "
+                    "all matching leads will be saved/refreshed on this job",
                 )
                 update_job(
                     job_id,
@@ -841,3 +961,9 @@ async def process_job(job: dict) -> None:
         push_error(job_id, msg)
         append_activity(job_id, f"Failed: {msg}")
         raise
+    finally:
+        hb_task.cancel()
+        try:
+            await hb_task
+        except asyncio.CancelledError:
+            pass

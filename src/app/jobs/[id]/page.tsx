@@ -9,16 +9,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { apiFetch } from "@/lib/api";
-import type { ScrapeJob } from "@/types";
+import type { Lead, ScrapeJob } from "@/types";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { WorkerStatusBanner } from "@/components/worker-status-banner";
 import { useToast } from "@/components/providers/toast-provider";
 import { EXTRACTION_MODE_LABELS, REVIEW_IMAGE_MODE_LABELS } from "@/lib/extraction-modes";
 
 const ACTIVE_STATUSES = new Set([
+  "pending",
   "running",
   "discovering_gigs",
   "extracting_reviews",
+  "verification_required",
 ]);
 
 const TERMINAL_STATUSES = new Set([
@@ -29,12 +31,21 @@ const TERMINAL_STATUSES = new Set([
   "lead_limit_reached",
 ]);
 
-/** Polling interval in ms based on job status */
+/** Polling interval in ms based on job status — keep Live Monitor snappy */
 function pollInterval(status: string | undefined): number {
-  if (!status) return 4000;
-  if (TERMINAL_STATUSES.has(status)) return 15_000;
-  if (status === "retry_required" || status === "paused" || status === "lead_limit_reached") return 8_000;
-  return 4000;
+  if (!status) return 2000;
+  if (TERMINAL_STATUSES.has(status)) return 12_000;
+  if (status === "retry_required" || status === "paused") return 5_000;
+  if (
+    status === "extracting_reviews" ||
+    status === "verification_required" ||
+    status === "running" ||
+    status === "discovering_gigs" ||
+    status === "pending"
+  ) {
+    return 800;
+  }
+  return 2000;
 }
 
 export default function JobMonitorPage() {
@@ -42,6 +53,7 @@ export default function JobMonitorPage() {
   const id = params?.id ?? "";
   const { toast } = useToast();
   const [job, setJob] = useState<ScrapeJob | null>(null);
+  const [liveLeads, setLiveLeads] = useState<Lead[]>([]);
   const [maxLeadsInput, setMaxLeadsInput] = useState<number | "">("");
 
   const fetchJob = useCallback(async () => {
@@ -54,17 +66,33 @@ export default function JobMonitorPage() {
     }
   }, [id]);
 
+  const fetchLiveLeads = useCallback(async () => {
+    if (!id) return;
+    try {
+      const data = await apiFetch<{ leads: Lead[] }>(`/api/jobs/${id}/leads`);
+      setLiveLeads(Array.isArray(data.leads) ? data.leads.slice(0, 40) : []);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [id]);
+
   useEffect(() => {
     if (!id) return;
     fetchJob();
-  }, [fetchJob, id]);
+    fetchLiveLeads();
+  }, [fetchJob, fetchLiveLeads, id]);
 
   useEffect(() => {
     if (!id) return;
     const ms = pollInterval(job?.status);
-    const t = setInterval(fetchJob, ms);
+    const t = setInterval(() => {
+      fetchJob();
+      if (ACTIVE_STATUSES.has(job?.status || "") || (job?.totalLeadsFound ?? 0) > 0) {
+        fetchLiveLeads();
+      }
+    }, ms);
     return () => clearInterval(t);
-  }, [fetchJob, job?.status, id]);
+  }, [fetchJob, fetchLiveLeads, job?.status, job?.totalLeadsFound, id]);
 
   const logEndRef = useRef<HTMLLIElement>(null);
   useEffect(() => {
@@ -398,13 +426,13 @@ export default function JobMonitorPage() {
           )}
         </CardHeader>
         <CardContent>
-          <ul className="max-h-56 overflow-y-auto rounded-md border border-border/60 bg-muted/10 p-3 text-xs font-mono space-y-1.5">
+          <ul className="max-h-72 overflow-y-auto rounded-md border border-border/60 bg-muted/10 p-3 text-xs font-mono space-y-1.5">
             {(job.activityLog || []).length === 0 ? (
               <li className="text-muted-foreground">No activity yet</li>
             ) : (
-              (job.activityLog || []).slice(-40).map((line, i, arr) => (
+              (job.activityLog || []).slice(-80).map((line, i, arr) => (
                 <li
-                  key={i}
+                  key={`${i}-${line.slice(0, 24)}`}
                   ref={i === arr.length - 1 ? logEndRef : null}
                   className="text-muted-foreground leading-relaxed"
                 >
@@ -422,7 +450,20 @@ export default function JobMonitorPage() {
             <CardTitle className="text-base font-semibold">Progress</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Progress value={job.progressPercent} />
+            <Progress
+              value={
+                job.listedReviewCount && job.listedReviewCount > 0
+                  ? Math.min(
+                      100,
+                      Math.round(
+                        ((job.totalReviewsParsed ?? job.reviewsChecked ?? 0) /
+                          job.listedReviewCount) *
+                          100
+                      )
+                    )
+                  : job.progressPercent
+              }
+            />
             <div className="grid grid-cols-2 gap-3 text-sm">
               {status === "discovering_gigs" && (job.currentSearchPage ?? 0) > 0 && (
                 <div className="col-span-2">
@@ -448,9 +489,21 @@ export default function JobMonitorPage() {
                 <p className="text-muted-foreground">Review page</p>
                 <p className="text-xl font-bold">{job.currentReviewPage || 0}</p>
               </div>
-              <div>
-                <p className="text-muted-foreground">Reviews parsed</p>
-                <p className="text-xl font-bold">{job.totalReviewsParsed ?? job.reviewsChecked}</p>
+              <div className="col-span-2">
+                <p className="text-muted-foreground">Reviews scanned</p>
+                <p className="text-xl font-bold tabular-nums">
+                  {(job.totalReviewsParsed ?? job.reviewsChecked ?? 0).toLocaleString()}
+                  {job.listedReviewCount
+                    ? ` / ${job.listedReviewCount.toLocaleString()}`
+                    : ""}
+                </p>
+                {job.lastScannedReview ? (
+                  <p className="mt-1 text-xs text-muted-foreground truncate">
+                    Now scanning:{" "}
+                    <span className="text-foreground">{job.lastScannedReview}</span>
+                    {job.lastScannedCountry ? ` · ${job.lastScannedCountry}` : ""}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <p className="text-muted-foreground">Gigs scanned</p>
@@ -520,11 +573,46 @@ export default function JobMonitorPage() {
         </Card>
       </div>
 
-      <div className="mt-6">
-        <Link href={`/leads?jobId=${id}`}>
-          <Button variant="outline">View Extracted Leads →</Button>
-        </Link>
-      </div>
+      <Card className="mt-6 border-border/80 shadow-sm">
+        <CardHeader className="pb-2 flex flex-row items-center justify-between gap-3">
+          <CardTitle className="text-base font-semibold">
+            Live leads ({liveLeads.length}
+            {job.totalLeadsFound ? ` of ${job.totalLeadsFound}` : ""})
+          </CardTitle>
+          <Link href={`/leads?jobId=${id}`}>
+            <Button variant="outline" size="sm">
+              Open all leads →
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {liveLeads.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No leads saved yet — counters and activity update while reviews are scanned.
+              {job.reviewImageMode === "with_image"
+                ? " With-image mode only keeps US/CA reviews that include a delivery image."
+                : ""}
+            </p>
+          ) : (
+            <ul className="max-h-80 overflow-y-auto divide-y divide-border/60 text-sm">
+              {liveLeads.map((lead) => (
+                <li key={lead._id} className="py-2.5 first:pt-0">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-medium">{lead.reviewerName}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {lead.country}
+                      {lead.reviewRating ? ` · ${lead.reviewRating}★` : ""}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                    {lead.review}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </DashboardLayout>
   );
 }

@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
     if (reextractFromStart) {
       await appendJobLog(
         jobId,
-        `Re-extract from start enabled — ${manualGigUrls.length} pasted gig(s) will be scraped fully again`
+        `Fresh scrape (ignore already-reviewed) — ${manualGigUrls.length} pasted gig(s); all matching leads will be saved/refreshed on this job`
       );
     } else if (continuationTail.length) {
       await appendJobLog(

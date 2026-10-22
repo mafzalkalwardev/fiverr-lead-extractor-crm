@@ -520,6 +520,25 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                         leave_gig_loop = True
                         break
 
+                    # Paste-link / queue: lead cap is only a max — once this gig's
+                    # reviews are exhausted we always leave (never hunt past the link).
+                    mode_now = (job.get("extractionMode") or "").strip()
+                    cap_now = int(job.get("maxTotalLeads") or max_leads_live)
+                    if mode_now == "manual_urls":
+                        append_activity(
+                            job_id,
+                            f"Gig link finished — reviews on this URL are done "
+                            f"(scanned {checked}; leads {leads_after}/{cap_now}). "
+                            "Lead limit does not keep scanning past the end of a pasted gig.",
+                        )
+                    elif i + 1 < len(queue):
+                        append_activity(
+                            job_id,
+                            f"Moving to next gig ({i + 2}/{len(queue)}) — "
+                            f"this gig's reviews are exhausted "
+                            f"(leads {leads_after}/{cap_now}).",
+                        )
+
                     state["resume_index"] = i + 1
                     refresh_job_counters(job_id, state)
                     leave_gig_loop = True
@@ -738,7 +757,15 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
             "totalGigs": len(queue),
         },
     )
-    append_activity(job_id, f"Completed · {total_leads} leads")
+    mode_done = (current.get("extractionMode") or job.get("extractionMode") or "").strip()
+    if mode_done == "manual_urls" and total_leads < max_leads:
+        append_activity(
+            job_id,
+            f"Completed · {total_leads} leads (under cap {max_leads}) — "
+            "all pasted gig link(s) finished; no more reviews on those URLs.",
+        )
+    else:
+        append_activity(job_id, f"Completed · {total_leads} leads")
     await release_work_page_after_job()
     return "completed"
 
@@ -876,6 +903,12 @@ async def process_job(job: dict) -> None:
                         "totalGigs": len(queue),
                     },
                 )
+            append_activity(
+                job_id,
+                "Paste Gig Links mode: only these URL(s) are scraped. "
+                "When a gig's reviews end, that link is done — "
+                "raising max leads does not invent more reviews on the same gig.",
+            )
             await process_gig_list(job, job_id, state)
             return
 

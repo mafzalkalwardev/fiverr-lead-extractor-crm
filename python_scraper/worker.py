@@ -540,6 +540,11 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                         )
 
                     state["resume_index"] = i + 1
+                    # Clear mid-gig checkpoint so the next URL does not inherit scan depth
+                    try:
+                        update_job(job_id, {"gigReviewCheckpoint": None})
+                    except Exception:
+                        pass
                     refresh_job_counters(job_id, state)
                     leave_gig_loop = True
 
@@ -593,6 +598,30 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                         state["resume_index"] = i + 1
                         leave_gig_loop = True
                         continue
+                    # Keep lead totals + scan depth from Mongo so extract resumes mid-gig
+                    try:
+                        fresh = get_job(job_id) or {}
+                        state["us_leads"] = int(
+                            fresh.get("usLeadsFound") or state.get("us_leads") or 0
+                        )
+                        state["canada_leads"] = int(
+                            fresh.get("canadaLeadsFound") or state.get("canada_leads") or 0
+                        )
+                        ckpt = fresh.get("gigReviewCheckpoint") or {}
+                        ckpt_checked = int(ckpt.get("checked") or 0)
+                        live_checked = int(fresh.get("reviewsChecked") or 0)
+                        # reviews_checked is progress before this gig; keep prior gigs only
+                        prior = max(0, live_checked - max(ckpt_checked, 0))
+                        if ckpt_checked > 0:
+                            state["reviews_checked"] = prior
+                        append_activity(
+                            job_id,
+                            f"Verification cleared — will resume scan "
+                            f"(checkpoint checked={ckpt_checked}, leads="
+                            f"{state['us_leads'] + state['canada_leads']})",
+                        )
+                    except Exception:
+                        pass
                     still_on_gig = False
                     try:
                         still_on_gig = await is_expected_resume_page(page, gig_url)

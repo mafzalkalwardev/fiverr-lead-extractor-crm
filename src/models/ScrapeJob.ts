@@ -124,6 +124,17 @@ const ScrapeJobSchema = new Schema<IScrapeJob>(
     lastScannedCountry: { type: String, default: "" },
     gigsScanned: { type: Number, default: 0 },
     reviewsChecked: { type: Number, default: 0 },
+    /** Mid-gig scan resume after verification (Python scraper). */
+    gigReviewCheckpoint: {
+      type: {
+        gigUrl: { type: String, default: "" },
+        checked: { type: Number, default: 0 },
+        reviewPage: { type: Number, default: 1 },
+        loadClicks: { type: Number, default: 0 },
+        processedFps: { type: [String], default: [] },
+      },
+      default: null,
+    },
     usLeadsFound: { type: Number, default: 0 },
     canadaLeadsFound: { type: Number, default: 0 },
     totalLeadsFound: { type: Number, default: 0 },

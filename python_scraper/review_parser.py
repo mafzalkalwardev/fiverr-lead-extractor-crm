@@ -14,11 +14,19 @@ from utils import (
     is_valid_reviewer_name,
     looks_like_rating,
     normalize_country,
+    normalize_fiverr_url,
     parse_review_date,
     parse_rating_after_country,
     reviewer_name_before_country,
 )
-from db import append_activity, set_heartbeat, update_job
+from db import (
+    append_activity,
+    get_job,
+    lead_keys_for_gig,
+    save_gig_review_checkpoint,
+    set_heartbeat,
+    update_job,
+)
 from page_data import extract_reviews_from_page_json
 from typing import Optional
 
@@ -1430,6 +1438,51 @@ async def extract_reviews(
         _strip_image_url(absolutize_url(main_gig_image)),
     } - {""}
 
+    # Resume after verification / interrupt: keep scanned count + skip already-saved leads
+    gig_key = normalize_fiverr_url(return_url) or clean_text(return_url)
+    resume_checked = 0
+    resume_page = 1
+    resume_clicks = 0
+    resume_fps: list[str] = []
+    try:
+        job_doc = get_job(job_id) or {}
+        ckpt = job_doc.get("gigReviewCheckpoint") or {}
+        ckpt_url = normalize_fiverr_url(ckpt.get("gigUrl") or "") or clean_text(
+            ckpt.get("gigUrl") or ""
+        )
+        if gig_key and ckpt_url and gig_key.rstrip("/").lower() == ckpt_url.rstrip("/").lower():
+            resume_checked = max(0, int(ckpt.get("checked") or 0))
+            resume_page = max(1, int(ckpt.get("reviewPage") or 1))
+            resume_clicks = max(0, int(ckpt.get("loadClicks") or 0))
+            raw_fps = ckpt.get("processedFps") or []
+            if isinstance(raw_fps, list):
+                resume_fps = [str(x) for x in raw_fps if x]
+        # Fallback: same gig link with a live counter already past the JSON warm-up
+        if resume_checked <= 0 and gig_key:
+            cur_link = normalize_fiverr_url(job_doc.get("currentGigLink") or "") or ""
+            live_checked = int(job_doc.get("reviewsChecked") or 0)
+            # reviewsChecked is progress_base + gig-local; recover gig-local
+            gig_local = max(0, live_checked - max(0, int(progress_base)))
+            if (
+                cur_link
+                and cur_link.rstrip("/").lower() == gig_key.rstrip("/").lower()
+                and gig_local > 20
+            ):
+                resume_checked = gig_local
+                resume_page = max(1, int(job_doc.get("currentReviewPage") or 1))
+    except Exception:
+        resume_fps = []
+
+    seen_keys: set[str] = set()
+    seen_text_keys: set[str] = set()
+    if job_id and gig_key:
+        try:
+            db_keys, db_text = lead_keys_for_gig(job_id, gig_key)
+            seen_keys |= db_keys
+            seen_text_keys |= db_text
+        except Exception:
+            pass
+
     json_reviews = await extract_reviews_from_page_json(page, seller_username)
     if with_images:
         parsed: list[dict] = [
@@ -1441,24 +1494,61 @@ async def extract_reviews(
         ]
     else:
         parsed = [{**r, "reviewedImageLink": ""} for r in json_reviews]
-    checked = len(json_reviews)
-    seen_keys = {
-        f"{clean_text(r['reviewerName']).lower()}|{clean_text(r['reviewText'])[:100].lower()}"
-        for r in parsed
-    }
-    seen_text_keys = {clean_text(r["reviewText"])[:140].lower() for r in parsed}
-    if json_reviews:
-        mode_note = "with review image links" if with_images else "without review image links"
+
+    # Never reset Live Monitor to ~10 after verification — resume prior scan depth
+    if resume_checked > 0:
+        checked = resume_checked
         append_activity(
             job_id,
-            f"JSON reviews parsed: {len(parsed)}/{len(json_reviews)} US/CA reviews ({mode_note})",
+            f"Resuming this gig after interrupt/verification — "
+            f"continuing from ~{resume_checked} reviews already scanned "
+            f"(not restarting from 0; {len(seen_keys)} leads already known for this gig)",
         )
-        # Stream JSON hits immediately so the UI/export fills while DOM scraping continues
-        for jr in list(parsed):
-            if not _emit(jr):
-                break
-        if stop_requested:
-            return parsed, checked
+        try:
+            update_job(
+                job_id,
+                {
+                    "reviewsChecked": progress_base + checked,
+                    "totalReviewsParsed": progress_base + checked,
+                    "currentReviewPage": resume_page,
+                },
+            )
+        except Exception:
+            pass
+    else:
+        checked = len(json_reviews)
+
+    if json_reviews:
+        mode_note = "with review image links" if with_images else "without review image links"
+        if resume_checked <= 0:
+            append_activity(
+                job_id,
+                f"JSON reviews parsed: {len(parsed)}/{len(json_reviews)} US/CA reviews ({mode_note})",
+            )
+            for jr in list(parsed):
+                key = (
+                    f"{clean_text(jr['reviewerName']).lower()}|"
+                    f"{clean_text(jr['reviewText'])[:100].lower()}"
+                )
+                seen_keys.add(key)
+                seen_text_keys.add(clean_text(jr["reviewText"])[:140].lower())
+                if not _emit(jr):
+                    break
+            if stop_requested:
+                return parsed, checked
+        else:
+            # Resume: remember JSON keys but do not re-save (avoids looking like a restart)
+            for jr in parsed:
+                seen_keys.add(
+                    f"{clean_text(jr['reviewerName']).lower()}|"
+                    f"{clean_text(jr['reviewText'])[:100].lower()}"
+                )
+                seen_text_keys.add(clean_text(jr["reviewText"])[:140].lower())
+            append_activity(
+                job_id,
+                f"JSON reviews available: {len(parsed)}/{len(json_reviews)} "
+                f"(skipped re-save on resume; already have {len(seen_keys)} keys)",
+            )
 
     await scroll_to_reviews(page)
     # Read listed total BEFORE opening the panel (count is on the gig header)
@@ -1469,11 +1559,18 @@ async def extract_reviews(
     # Panel / "See all reviews (N)" can expose a better count
     listed_review_count = max(listed_review_count, await read_listed_review_count(page))
     if listed_review_count > 0:
-        append_activity(
-            job_id,
-            f"Gig lists ~{listed_review_count:,} reviews — will scan through them "
-            "and extract all targeted US/CA leads",
-        )
+        if resume_checked <= 0:
+            append_activity(
+                job_id,
+                f"Gig lists ~{listed_review_count:,} reviews — will scan through them "
+                "and extract all targeted US/CA leads",
+            )
+        else:
+            append_activity(
+                job_id,
+                f"Gig lists ~{listed_review_count:,} reviews — resuming scan "
+                f"({resume_checked}/{listed_review_count} already checked)",
+            )
         update_job(
             job_id,
             {
@@ -1490,17 +1587,37 @@ async def extract_reviews(
     listed_coverage_target = (
         max(1, int(listed_review_count * 0.92)) if listed_review_count > 0 else 0
     )
-    review_page = 1
+    review_page = resume_page if resume_checked > 0 else 1
     total_load_clicks = 0
+    # Fast-forward Show More toward prior depth so we don't re-walk page 1 for hours
+    if resume_checked > 40:
+        ff_clicks = min(
+            max(resume_clicks, resume_checked // 5),
+            max(12, int(getattr(config, "REVIEW_LOAD_MORE_MAX", 400) // 2)),
+        )
+        ff_clicks = min(ff_clicks, 120)
+        if ff_clicks > 0:
+            append_activity(
+                job_id,
+                f"Fast-forwarding ~{ff_clicks} Show More click(s) to resume depth…",
+            )
+            got = await click_load_more(
+                page,
+                max_clicks=ff_clicks,
+                job_id=job_id,
+                return_url=return_url or None,
+            )
+            total_load_clicks += got
+            review_page = max(review_page, 1 + got)
     seen_page_signatures: set[str] = set()
     consecutive_empty_pages = 0
     stagnant_rounds = 0
     # Show More that does not surface unseen cards (Fiverr often recycles the same DOM)
     useless_expand_streak = 0
     useless_expand_max = max(2, int(getattr(config, "REVIEW_USELESS_EXPAND_MAX", 4)))
-    checked_at_last_progress = 0
+    checked_at_last_progress = checked
     # Cards already fully evaluated (kept or skipped) — avoid re-work that feels "stuck"
-    processed_card_fps: set[str] = set()
+    processed_card_fps: set[str] = set(resume_fps if resume_checked > 0 else [])
     # US/CA cards missing images: retry a few times, then stop re-scanning forever
     no_image_attempts: dict[str, int] = {}
     skip_stats = {"country": 0, "image": 0, "dup": 0, "other": 0}
@@ -1511,6 +1628,7 @@ async def extract_reviews(
     live_push_every = max(1, int(getattr(config, "REVIEW_LIVE_PUSH_EVERY", 1)))
     live_push_min_sec = float(getattr(config, "REVIEW_LIVE_PUSH_MIN_SEC", 0.35))
     last_live_push = 0.0
+    last_checkpoint_mono = 0.0
 
     def _card_fp(card_text: str) -> str:
         return clean_text(card_text)[:120].lower()
@@ -1521,7 +1639,7 @@ async def extract_reviews(
         last_label: str = "",
         last_country: str = "",
     ) -> None:
-        nonlocal last_live_push
+        nonlocal last_live_push, last_checkpoint_mono
         now = time.monotonic()
         # Throttle DB writes (~3/sec) so Live Monitor stays smooth without overload
         if not force and (now - last_live_push) < live_push_min_sec:
@@ -1546,6 +1664,20 @@ async def extract_reviews(
             set_heartbeat()
         except Exception:
             pass
+        # Persist resume checkpoint every ~15s so verification cannot wipe progress
+        if return_url and (force or (now - last_checkpoint_mono) >= 15.0):
+            last_checkpoint_mono = now
+            try:
+                save_gig_review_checkpoint(
+                    job_id,
+                    gig_url=return_url,
+                    checked=checked,  # gig-local (progress_base added only for UI fields)
+                    review_page=review_page,
+                    load_clicks=total_load_clicks,
+                    processed_fps=processed_card_fps,
+                )
+            except Exception:
+                pass
 
     def _note_skip(kind: str, detail: str = "") -> None:
         skip_stats[kind] = skip_stats.get(kind, 0) + 1
@@ -1579,6 +1711,20 @@ async def extract_reviews(
                 "status": "extracting_reviews",
             },
         )
+
+        # Checkpoint before any verification wait so a Press & Hold cannot wipe progress
+        if return_url and checked > 0:
+            try:
+                save_gig_review_checkpoint(
+                    job_id,
+                    gig_url=return_url,
+                    checked=checked,
+                    review_page=review_page,
+                    load_clicks=total_load_clicks,
+                    processed_fps=processed_card_fps,
+                )
+            except Exception:
+                pass
 
         # Thorough verification only periodically — every-page full body reads stalled after Show More
         await _raise_if_verification(
@@ -1758,6 +1904,18 @@ async def extract_reviews(
                 if not unlimited and len(parsed) >= max_reviews:
                     break
             except VerificationRequiredError:
+                if return_url:
+                    try:
+                        save_gig_review_checkpoint(
+                            job_id,
+                            gig_url=return_url,
+                            checked=checked,
+                            review_page=review_page,
+                            load_clicks=total_load_clicks,
+                            processed_fps=processed_card_fps,
+                        )
+                    except Exception:
+                        pass
                 raise
             except Exception:
                 _note_skip("other", "stale-card")

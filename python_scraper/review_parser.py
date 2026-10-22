@@ -288,13 +288,12 @@ async def _raise_if_verification(
     """
     When a challenge appears mid-scrape: wait/clear in place when job_id is known
     (keeps us on the gig). Only raise when we cannot wait here.
-    Always clears the mid-page "Before we continue / Press & Hold" popup the same
-    way as the full-page challenge — not optional.
+    Mid-page Press & Hold is caught by the fast JS path even when thorough=False.
     """
     try:
-        # Always thorough for this check — the popup must never be skipped
-        challenged = await is_verification_page(page, thorough=True)
-        if not challenged:
+        # Respect thorough: full body.inner_text on every card/Show More was stalling runs
+        challenged = await is_verification_page(page, thorough=thorough)
+        if not challenged and thorough:
             challenged = await find_context_verification_page(page) is not None
         if not challenged:
             return
@@ -351,9 +350,10 @@ async def click_load_more(
     for _ in range(max_clicks):
         try:
             # Every expand — clear Press & Hold popup immediately if it appeared
+            # Fast check each click; thorough only every few expands (full body read is slow)
             await _raise_if_verification(
                 page,
-                thorough=True,
+                thorough=(clicks == 0 or clicks % 5 == 0),
                 job_id=job_id,
                 return_url=return_url,
             )
@@ -421,11 +421,11 @@ async def click_load_more(
 
             if not clicked:
                 await _raise_if_verification(
-                    page, thorough=True, job_id=job_id, return_url=return_url
+                    page, thorough=False, job_id=job_id, return_url=return_url
                 )
                 break
             clicks += 1
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.25)
             after_fp = await _review_list_fingerprint(page)
             after = 0
             try:
@@ -444,7 +444,7 @@ async def click_load_more(
                 page, thorough=True, job_id=job_id, return_url=return_url
             )
             await page.mouse.wheel(0, 900)
-            await asyncio.sleep(0.45)
+            await asyncio.sleep(0.3)
             after_fp2 = await _review_list_fingerprint(page)
             if after_fp2 and after_fp2 != before_fp:
                 stagnant = 0
@@ -1019,10 +1019,10 @@ def _image_from_json_reviews(
 
 
 async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = None) -> str:
-    """Review attachment / delivery image — scroll card into view so lazy images populate."""
+    """Review attachment / delivery image — prefer one JS pass; heavy hover only on miss."""
     try:
-        await card.scroll_into_view_if_needed(timeout=2000)
-        await asyncio.sleep(0.25)
+        await card.scroll_into_view_if_needed(timeout=1200)
+        await asyncio.sleep(0.08)
     except Exception:
         pass
 
@@ -1097,16 +1097,16 @@ async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = N
     except Exception:
         pass
 
-    # Hover media tiles — some Fiverr thumbs only resolve src after hover
+    # Light fallback only — full per-img Playwright loops made US cards feel "stuck"
     try:
         media = card.locator(
-            '[class*="attachment" i], [class*="media" i], [data-testid*="attachment" i], '
-            'button:has(img), a:has(img)'
-        )
-        for i in range(min(await media.count(), 4)):
+            '[class*="attachment" i] img, [data-testid*="attachment" i] img, '
+            '[class*="media" i] img'
+        ).first
+        if await media.count():
             try:
-                await media.nth(i).hover(timeout=800)
-                await asyncio.sleep(0.15)
+                await media.hover(timeout=500)
+                await asyncio.sleep(0.12)
             except Exception:
                 pass
         urls = await card.evaluate(
@@ -1120,41 +1120,9 @@ async def _review_delivery_image(card: Locator, reject_urls: set[str] | None = N
               return out;
             }"""
         )
-        best = _pick_best_image_url(urls, reject_urls)
-        if best:
-            return best
+        return _pick_best_image_url(urls, reject_urls)
     except Exception:
-        pass
-
-    imgs = card.locator("img")
-    urls: list[str] = []
-    for i in range(min(await imgs.count(), 30)):
-        img = imgs.nth(i)
-        for attr in ("src", "data-src", "data-lazy-src", "data-original"):
-            src = await img.get_attribute(attr) or ""
-            if src:
-                urls.append(src)
-        srcset = await img.get_attribute("srcset") or ""
-        if srcset:
-            urls.append(_image_from_srcset(srcset))
-
-    for sel in (
-        'a[href*=".jpg"], a[href*=".jpeg"], a[href*=".png"], a[href*="cloudinary"], a[href*="attachment"]',
-    ):
-        links = card.locator(sel)
-        for i in range(min(await links.count(), 8)):
-            href = await links.nth(i).get_attribute("href") or ""
-            if href:
-                urls.append(href)
-
-    styled = card.locator('[style*="background"]')
-    for i in range(min(await styled.count(), 12)):
-        style = await styled.nth(i).get_attribute("style") or ""
-        match = re.search(r"url\([\"']?([^\"')]+)", style)
-        if match:
-            urls.append(match.group(1))
-
-    return _pick_best_image_url(urls, reject_urls)
+        return ""
 
 def _country_mention_count(text: str) -> int:
     return len(re.findall(r"\b(United States|USA|U\.S\.?|Canada)\b", text, re.I))
@@ -1188,40 +1156,110 @@ async def _review_date(card: Locator, card_text: str):
 
 
 async def _collect_review_cards(page: Page) -> list[tuple[Locator, str]]:
-    seen: set[str] = set()
-    out: list[tuple[Locator, str, str]] = []
+    """
+    Batch-read review cards in one JS pass. Per-card Playwright inner_text/_find_country
+    used to take minutes after Show More (100–200 DOM cards) with no UI updates.
+    """
+    scan_cap = max(100, int(getattr(config, "REVIEW_CARD_SCAN_MAX", 5000)))
+    selectors = list(REVIEW_CARD_SELECTORS)
+    try:
+        payload = await page.evaluate(
+            """({ selectors, scanCap }) => {
+              const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+              for (let si = 0; si < selectors.length; si++) {
+                const sel = selectors[si];
+                let nodes;
+                try { nodes = Array.from(document.querySelectorAll(sel)); }
+                catch (e) { continue; }
+                if (!nodes.length) continue;
+                const seen = new Set();
+                const items = [];
+                const limit = Math.min(nodes.length, scanCap);
+                for (let i = 0; i < limit; i++) {
+                  const el = nodes[i];
+                  const text = clean(el.innerText || el.textContent || '');
+                  if (text.length < 40 || text.length > 4500) continue;
+                  const key = text.slice(0, 100).toLowerCase();
+                  if (seen.has(key)) continue;
+                  const className = ((el.className || '') + '').toString().toLowerCase();
+                  if (className.includes('review-item-description')) continue;
+                  if (si >= 3) {
+                    const countryHits = (text.match(/\\b(United States|USA|U\\.S\\.?|Canada|United Kingdom|Germany|France|India|Australia)\\b/gi) || []).length;
+                    if (countryHits > 3 && !className.includes('review')) continue;
+                  }
+                  if (!className.includes('review') && si >= 2) {
+                    // Weak selectors only: require a country-ish token in text
+                    if (!/\\b(United States|USA|Canada|United Kingdom|Germany|India|Australia|France|Netherlands|Italy|Spain)\\b/i.test(text)) {
+                      continue;
+                    }
+                  }
+                  seen.add(key);
+                  items.push({ index: i, text, className });
+                }
+                if (items.length && si < 3) {
+                  return { selector: sel, selectorIndex: si, items };
+                }
+                if (items.length) {
+                  return { selector: sel, selectorIndex: si, items };
+                }
+              }
+              return { selector: '', selectorIndex: 0, items: [] };
+            }""",
+            {"selectors": selectors, "scanCap": scan_cap},
+        )
+    except Exception:
+        payload = None
 
-    for selector_index, sel in enumerate(REVIEW_CARD_SELECTORS):
-        loc = page.locator(sel)
-        scan_cap = max(100, int(getattr(config, "REVIEW_CARD_SCAN_MAX", 5000)))
-        for i in range(min(await loc.count(), scan_cap)):
+    out: list[tuple[Locator, str, str]] = []
+    if payload and payload.get("selector") and payload.get("items"):
+        loc = page.locator(str(payload["selector"]))
+        for item in payload["items"]:
             try:
-                card = loc.nth(i)
-                text = await _card_text(card)
-                if len(text) < 40 or len(text) > 4500:
+                idx = int(item.get("index", -1))
+                text = clean_text(item.get("text") or "")
+                class_name = clean_text(item.get("className") or "").lower()
+                if idx < 0 or len(text) < 40:
                     continue
-                key = text[:100].lower()
-                if key in seen:
-                    continue
-                country = await _find_country(card, text)
-                class_name = (await card.get_attribute("class") or "").lower()
-                if "review-item-description" in class_name:
-                    continue
-                if not country and "review" not in class_name:
-                    continue
-                if (
-                    selector_index >= 3
-                    and _country_mention_count(text) > 3
-                    and "review" not in class_name
-                ):
-                    continue
-                seen.add(key)
-                out.append((card, text, class_name))
+                out.append((loc.nth(idx), text, class_name))
             except Exception:
-                # Stale node after Show More / virtualization — skip, keep scanning
                 continue
-        if out and selector_index < 3:
-            break
+    else:
+        # Fallback: sparse Playwright walk (slow path)
+        seen: set[str] = set()
+        for selector_index, sel in enumerate(REVIEW_CARD_SELECTORS):
+            loc = page.locator(sel)
+            try:
+                count = min(await loc.count(), scan_cap)
+            except Exception:
+                count = 0
+            for i in range(count):
+                try:
+                    card = loc.nth(i)
+                    text = await _card_text(card)
+                    if len(text) < 40 or len(text) > 4500:
+                        continue
+                    key = text[:100].lower()
+                    if key in seen:
+                        continue
+                    class_name = (await card.get_attribute("class") or "").lower()
+                    if "review-item-description" in class_name:
+                        continue
+                    if selector_index >= 2 and "review" not in class_name:
+                        if not _normalize_target_country(text) and _country_mention_count(text) < 1:
+                            continue
+                    if (
+                        selector_index >= 3
+                        and _country_mention_count(text) > 3
+                        and "review" not in class_name
+                    ):
+                        continue
+                    seen.add(key)
+                    out.append((card, text, class_name))
+                except Exception:
+                    continue
+            if out and selector_index < 3:
+                break
+
     out.sort(
         key=lambda item: (
             0 if "review-item-component-wrapper" in item[2] else 1,
@@ -1542,19 +1580,35 @@ async def extract_reviews(
             },
         )
 
+        # Thorough verification only periodically — every-page full body reads stalled after Show More
         await _raise_if_verification(
-            page, thorough=True, job_id=job_id, return_url=return_url or None
+            page,
+            thorough=(review_page == 1 or review_page % 4 == 0),
+            job_id=job_id,
+            return_url=return_url or None,
         )
-        await assert_page_accessible(page, job_id, return_url or None)
+        if review_page == 1 or review_page % 5 == 0:
+            await assert_page_accessible(page, job_id, return_url or None)
 
         # Scan FIRST, then expand a tiny burst. Expanding 20× before scan drops
         # reviews Fiverr swaps out of the DOM — that was the "missing reviews" bug.
+        collect_t0 = time.monotonic()
         candidates = await _collect_review_cards(page)
-        if review_page == 1 or review_page % 2 == 0 or total_load_clicks == 0:
+        collect_ms = int((time.monotonic() - collect_t0) * 1000)
+        unseen_estimate = sum(1 for _c, t in candidates if _card_fp(t) not in processed_card_fps)
+        # Always log right after Show More / collect so Live Monitor never looks frozen
+        if (
+            review_page == 1
+            or review_page % 2 == 0
+            or total_load_clicks == 0
+            or unseen_estimate > 0
+        ):
             append_activity(
                 job_id,
-                f"Review page {review_page}: {len(candidates)} review block(s) in DOM "
-                f"(scanned={checked}, kept={len(parsed)}, showMoreClicks={total_load_clicks})",
+                f"Review page {review_page}: {len(candidates)} in DOM, "
+                f"~{unseen_estimate} new to scan "
+                f"(scanned={checked}, kept={len(parsed)}, showMore={total_load_clicks}, "
+                f"collect={collect_ms}ms)",
             )
 
         signature = f"{len(candidates)}|" + "|".join(
@@ -1586,7 +1640,7 @@ async def extract_reviews(
                 if checked == 1 or checked % verif_every == 0:
                     await _raise_if_verification(
                         page,
-                        thorough=True,
+                        thorough=False,
                         job_id=job_id,
                         return_url=return_url or None,
                     )
@@ -1594,7 +1648,19 @@ async def extract_reviews(
                 new_card_fps += 1
                 processed_card_fps.add(fp)
                 # Tick Live Monitor immediately so "Reviews scanned" moves per card
-                _push_live_scan(force=(checked == 1 or checked % 5 == 0))
+                _push_live_scan(force=(checked == 1 or checked % 3 == 0))
+                if new_card_fps == 1 or new_card_fps % 10 == 0:
+                    append_activity(
+                        job_id,
+                        f"Scanning new cards… {new_card_fps}/{max(unseen_estimate, new_card_fps)} "
+                        f"this round (total scanned {checked}"
+                        + (
+                            f"/{listed_review_count}"
+                            if listed_review_count > 0
+                            else ""
+                        )
+                        + ")",
+                    )
 
                 country = await _find_country(card, card_text)
                 norm = normalize_country(country)
@@ -1636,10 +1702,10 @@ async def extract_reviews(
                     if image and not is_valid_review_image(image):
                         image = ""
                     if not image:
-                        # One retry after a short wait — lazy images often arrive late
+                        # One short retry — long sleeps here stacked into multi-minute stalls
                         try:
-                            await card.scroll_into_view_if_needed(timeout=1500)
-                            await asyncio.sleep(0.55)
+                            await card.scroll_into_view_if_needed(timeout=800)
+                            await asyncio.sleep(0.2)
                         except Exception:
                             pass
                         image = await _review_delivery_image(card, reject_image_urls)
@@ -1738,7 +1804,10 @@ async def extract_reviews(
         # Never dismiss verification / reviews dialogs here — only image galleries
         await _close_open_dialogs(page)
         await _raise_if_verification(
-            page, thorough=True, job_id=job_id, return_url=return_url or None
+            page,
+            thorough=(review_page % 3 == 0),
+            job_id=job_id,
+            return_url=return_url or None,
         )
 
         # Progress = new card content seen this round (not only kept US/CA+image).

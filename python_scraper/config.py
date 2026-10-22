@@ -18,7 +18,7 @@ REVIEW_LOAD_MORE_BURST = int(os.getenv("REVIEW_LOAD_MORE_BURST", "3"))
 REVIEW_USELESS_EXPAND_MAX = int(os.getenv("REVIEW_USELESS_EXPAND_MAX", "4"))
 REVIEW_CARD_SCAN_MAX = int(os.getenv("REVIEW_CARD_SCAN_MAX", "5000"))
 # How often to re-check Press & Hold while scanning cards (higher = fewer pauses)
-REVIEW_VERIF_CHECK_EVERY = int(os.getenv("REVIEW_VERIF_CHECK_EVERY", "12"))
+REVIEW_VERIF_CHECK_EVERY = int(os.getenv("REVIEW_VERIF_CHECK_EVERY", "20"))
 # Live Monitor: push scan counter to Mongo at least this often while walking cards
 REVIEW_LIVE_PUSH_EVERY = int(os.getenv("REVIEW_LIVE_PUSH_EVERY", "1"))
 REVIEW_LIVE_PUSH_MIN_SEC = float(os.getenv("REVIEW_LIVE_PUSH_MIN_SEC", "0.35"))

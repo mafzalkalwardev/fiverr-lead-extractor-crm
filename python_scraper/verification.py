@@ -124,20 +124,27 @@ async def find_context_verification_page(page: Page) -> Optional[Page]:
     ordered = [page] + [p for p in reversed(pages) if p is not page]
     for candidate in ordered:
         try:
-            if await is_verification_page(candidate):
+            if await is_verification_page(candidate, thorough=False):
                 return candidate
         except Exception:
             pass
+        # Avoid full body.inner_text on every poll — that stalled Show More → scan gaps
         try:
-            title = await candidate.title()
+            url = (candidate.url or "").lower()
+            title = (await candidate.title() or "").lower()
         except Exception:
-            title = ""
+            url, title = "", ""
+        if not any(
+            k in url or k in title
+            for k in ("captcha", "challenge", "human", "press", "verification", "px")
+        ):
+            continue
         body = ""
         try:
-            body = (await candidate.locator("body").inner_text(timeout=800))[:2500]
+            body = (await candidate.locator("body").inner_text(timeout=600))[:2500]
         except Exception:
             pass
-        text = f"{candidate.url}\n{title}\n{body}"
+        text = f"{url}\n{title}\n{body}"
         if _matches_verification_text(text):
             return candidate
     return None

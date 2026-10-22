@@ -42,13 +42,31 @@ def clean_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+# Fiverr may show country labels in the browser/account language on a fresh PC.
+_US_COUNTRY_ALIASES = re.compile(
+    r"\b("
+    r"united states|usa|u\.s\.a\.|u\.s\.|"
+    r"estados unidos|états[\-\s]?unis|etats[\-\s]?unis|"
+    r"vereinigte staaten|stati uniti|estados unidos da américa|"
+    r"amerika serikat|미국|アメリカ合衆国|美国|美國"
+    r")\b",
+    re.I,
+)
+_CA_COUNTRY_ALIASES = re.compile(
+    r"\b("
+    r"canada|canadá|kanada|캐나다|カナダ|加拿大"
+    r")\b",
+    re.I,
+)
+
+
 def normalize_country(country: str) -> str:
     c = clean_text(country)
     if not c:
         return ""
-    if re.match(r"^(us|usa|u\.s\.?)$", c, re.I) or re.search(r"united states", c, re.I):
+    if re.match(r"^(us|usa|u\.s\.?)$", c, re.I) or _US_COUNTRY_ALIASES.search(c):
         return "United States"
-    if re.match(r"^ca$", c, re.I) or re.search(r"\bcanada\b", c, re.I):
+    if re.match(r"^ca$", c, re.I) or _CA_COUNTRY_ALIASES.search(c):
         return "Canada"
     return c
 

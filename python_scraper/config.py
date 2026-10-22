@@ -14,6 +14,8 @@ BLOCK_HEAVY_RESOURCES = os.getenv("BLOCK_HEAVY_RESOURCES", "true").lower() == "t
 REVIEW_LOAD_MORE_MAX = int(os.getenv("REVIEW_LOAD_MORE_MAX", "400"))
 # Keep small: Fiverr replaces DOM cards; scanning must happen between expands
 REVIEW_LOAD_MORE_BURST = int(os.getenv("REVIEW_LOAD_MORE_BURST", "3"))
+# Consecutive Show More bursts that yield 0 new cards → leave the gig (prevents 3h stuck loops)
+REVIEW_USELESS_EXPAND_MAX = int(os.getenv("REVIEW_USELESS_EXPAND_MAX", "4"))
 REVIEW_CARD_SCAN_MAX = int(os.getenv("REVIEW_CARD_SCAN_MAX", "5000"))
 # How often to re-check Press & Hold while scanning cards (higher = fewer pauses)
 REVIEW_VERIF_CHECK_EVERY = int(os.getenv("REVIEW_VERIF_CHECK_EVERY", "12"))

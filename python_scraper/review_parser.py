@@ -71,10 +71,12 @@ def _normalize_target_country(value: str, allow_short_code: bool = False) -> str
     text = clean_text(text)
     if not text:
         return ""
-    if re.search(r"\b(united states|usa|u\.s\.a\.|u\.s\.)\b", text, re.I):
-        return "United States"
-    if re.search(r"\bcanada\b", text, re.I):
-        return "Canada"
+    # Prefer shared normalizer (includes localized Fiverr country labels)
+    from utils import normalize_country as _norm_country
+
+    mapped = _norm_country(text)
+    if mapped in ("United States", "Canada"):
+        return mapped
     if allow_short_code and re.match(r"^(us|u\.s\.|usa|u\.s\.a\.)$", text, re.I):
         return "United States"
     if allow_short_code and re.match(r"^ca$", text, re.I):
@@ -739,9 +741,12 @@ async def _find_country(card: Locator, card_text: str) -> str:
                 if c:
                     return c
 
-    # 3) Phrase forms
+    # 3) Phrase forms (English + common Fiverr localizations)
     m = re.search(
-        r"\b(?:from|located in|based in)\s+(United States|U\.S\.A\.|USA|U\.S\.|Canada|CA)\b",
+        r"\b(?:from|located in|based in|de|desde|von|da)\s+"
+        r"(United States|U\.S\.A\.|USA|U\.S\.|Canada|CA|"
+        r"Estados Unidos|États[\-\s]?Unis|Etats[\-\s]?Unis|Vereinigte Staaten|"
+        r"Stati Uniti|Canadá|Kanada)\b",
         card_text,
         re.I,
     )
@@ -1452,8 +1457,14 @@ async def extract_reviews(
     seen_page_signatures: set[str] = set()
     consecutive_empty_pages = 0
     stagnant_rounds = 0
+    # Show More that does not surface unseen cards (Fiverr often recycles the same DOM)
+    useless_expand_streak = 0
+    useless_expand_max = max(2, int(getattr(config, "REVIEW_USELESS_EXPAND_MAX", 4)))
+    checked_at_last_progress = 0
     # Cards already fully evaluated (kept or skipped) — avoid re-work that feels "stuck"
     processed_card_fps: set[str] = set()
+    # US/CA cards missing images: retry a few times, then stop re-scanning forever
+    no_image_attempts: dict[str, int] = {}
     skip_stats = {"country": 0, "image": 0, "dup": 0, "other": 0}
     skip_log_every = max(5, int(getattr(config, "REVIEW_SKIP_LOG_EVERY", 25)))
     burst = max(1, int(getattr(config, "REVIEW_LOAD_MORE_BURST", 3)))
@@ -1642,9 +1653,11 @@ async def extract_reviews(
                         if image and not is_valid_review_image(image):
                             image = ""
                     if not image:
-                        # Don't mark permanently if image missing — allow re-try if
-                        # the same card reappears after further expand/scroll.
-                        processed_card_fps.discard(fp)
+                        tries = no_image_attempts.get(fp, 0) + 1
+                        no_image_attempts[fp] = tries
+                        if tries < 2:
+                            # One re-try after further expand/scroll — then lock the card
+                            processed_card_fps.discard(fp)
                         _note_skip("image", reviewer)
                         _push_live_scan(
                             force=True,
@@ -1732,6 +1745,8 @@ async def extract_reviews(
         # Stopping on zero kept was quitting while Show More still had more reviews.
         if new_card_fps > 0 or new_unique > 0:
             stagnant_rounds = 0
+            useless_expand_streak = 0
+            checked_at_last_progress = checked
         else:
             stagnant_rounds += 1
         if signature:
@@ -1740,6 +1755,7 @@ async def extract_reviews(
         advanced = await click_next_review_page(page, review_page)
         if advanced:
             stagnant_rounds = 0
+            useless_expand_streak = 0
             review_page += 1
             continue
 
@@ -1749,20 +1765,53 @@ async def extract_reviews(
         )
         total_load_clicks += load_clicks
         if load_clicks > 0:
+            # Probe immediately: Fiverr often "succeeds" Show More while recycling
+            # the same cards — that used to reset stagnant and spin for hours.
+            try:
+                await asyncio.sleep(0.45)
+            except Exception:
+                pass
+            probe_cards = await _collect_review_cards(page)
+            unseen_after = sum(
+                1 for _c, t in probe_cards if _card_fp(t) not in processed_card_fps
+            )
+            if unseen_after > 0:
+                useless_expand_streak = 0
+                stagnant_rounds = 0
+                append_activity(
+                    job_id,
+                    f"Show More +{load_clicks} (total clicks={total_load_clicks}) — "
+                    f"~{unseen_after} new card(s) to scan"
+                    + (
+                        f" ({checked}/{listed_review_count} listed)"
+                        if listed_review_count > 0
+                        else ""
+                    ),
+                )
+                review_page += 1
+                continue
+
+            useless_expand_streak += 1
+            stagnant_rounds += 1
             append_activity(
                 job_id,
-                f"Show More +{load_clicks} (total clicks={total_load_clicks}) — "
-                f"will scan new cards next"
-                + (
-                    f" ({checked}/{listed_review_count} listed)"
-                    if listed_review_count > 0
-                    else ""
-                ),
+                f"Show More +{load_clicks} produced 0 new cards "
+                f"(useless streak {useless_expand_streak}/{useless_expand_max}; "
+                f"total clicks={total_load_clicks}; scanned={checked}"
+                + (f"/{listed_review_count}" if listed_review_count > 0 else "")
+                + ") — not resetting progress",
             )
-            # Expanding means more reviews may appear — never treat as stagnant end
-            stagnant_rounds = 0
-            review_page += 1
-            continue
+            if useless_expand_streak >= useless_expand_max:
+                append_activity(
+                    job_id,
+                    f"Leaving gig — Show More stuck recycling the same reviews "
+                    f"(scanned {checked}"
+                    + (f"/{listed_review_count} listed" if listed_review_count > 0 else "")
+                    + f", kept {len(parsed)} US/CA, clicks={total_load_clicks}). "
+                    "Moving to next gig.",
+                )
+                break
+            # Fall through to stagnant / scroll fallbacks (do NOT continue forever)
 
         before_count = len(candidates)
         scroll_rounds = await scroll_load_more_reviews(
@@ -1781,13 +1830,27 @@ async def extract_reviews(
             )
             review_page += 1
             stagnant_rounds = 0
+            useless_expand_streak = 0
             continue
 
+        # Hard stop: many clicks but scanned count not moving (classic client stuck)
+        if (
+            total_load_clicks >= 24
+            and checked <= checked_at_last_progress
+            and new_card_fps == 0
+        ):
+            append_activity(
+                job_id,
+                f"Leaving gig — scanned stuck at {checked} after "
+                f"{total_load_clicks} Show More clicks with no new cards. Moving on.",
+            )
+            break
+
         # Only stop when expand/scroll cannot surface new card content.
-        # If we still haven't covered the listed total, keep trying a bit longer.
-        stagnant_limit = 8 if (
+        # Keep listed-coverage patience modest — never multi-hour spin.
+        stagnant_limit = 6 if (
             listed_review_count > 0 and checked < listed_coverage_target
-        ) else 5
+        ) else 4
         if stagnant_rounds >= stagnant_limit:
             append_activity(
                 job_id,
@@ -1799,7 +1862,7 @@ async def extract_reviews(
                     if listed_review_count > 0
                     else ""
                 )
-                + ")",
+                + "). Moving to next gig.",
             )
             break
         review_page += 1

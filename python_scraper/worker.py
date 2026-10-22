@@ -381,6 +381,7 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                     leads_before = state["us_leads"] + state["canada_leads"]
                     live_saved = 0
                     live_dupes = 0
+                    live_reject_reasons: dict[str, int] = {}
 
                     def _on_review(review: dict) -> bool:
                         nonlocal live_saved, live_dupes, job
@@ -438,6 +439,18 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                                     )
                                 except Exception:
                                     pass
+                        else:
+                            # Was silent before — new PCs often fail here (seller/title/image)
+                            key = reason or "unknown"
+                            live_reject_reasons[key] = live_reject_reasons.get(key, 0) + 1
+                            total_rej = sum(live_reject_reasons.values())
+                            if total_rej in (1, 5, 25) or total_rej % 50 == 0:
+                                rn = clean_text(review.get("reviewerName") or "") or "?"
+                                append_activity(
+                                    job_id,
+                                    f"Lead rejected: {rn} reason={key} "
+                                    f"(totals: {live_reject_reasons})",
+                                )
                         return True
 
                     reviews, checked = await extract_reviews(
@@ -471,6 +484,12 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                             f"(duplicates during live pass: {live_dupes})",
                         )
                     else:
+                        if live_reject_reasons:
+                            append_activity(
+                                job_id,
+                                f"0 leads saved on this gig — reject reasons: {live_reject_reasons}. "
+                                "Check seller/title parsed, image mode, and Fiverr language (English).",
+                            )
                         save_result = await _save_reviews(
                             job, job_id, gig, reviews, state
                         )

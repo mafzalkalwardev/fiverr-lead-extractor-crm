@@ -289,6 +289,27 @@ async def launch_browser() -> BrowserContext:
                 )
                 _context.on("close", lambda: _set_context_none())
                 _context.on("page", lambda p: asyncio.create_task(_auto_close_new_tab(p)))
+                # Fresh PCs often get Fiverr UI in the OS/account language; force English
+                # so US/Canada country labels match the lead filters.
+                try:
+                    await _context.add_cookies(
+                        [
+                            {
+                                "name": "locale",
+                                "value": "en_US",
+                                "domain": ".fiverr.com",
+                                "path": "/",
+                            },
+                            {
+                                "name": "language",
+                                "value": "en",
+                                "domain": ".fiverr.com",
+                                "path": "/",
+                            },
+                        ]
+                    )
+                except Exception:
+                    pass
                 await _context.add_init_script("""
                     try {
                         // Hide automation signals

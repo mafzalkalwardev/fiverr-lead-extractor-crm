@@ -182,23 +182,30 @@ def save_gig_review_checkpoint(
     review_page: int,
     load_clicks: int,
     processed_fps: set[str] | None = None,
+    progress_base: int = 0,
 ) -> None:
+    """
+    Persist mid-gig resume state. `checked` is gig-local; Live Monitor totals use
+    progress_base + checked so multi-gig jobs do not lose earlier scan counts.
+    """
     fps = list(processed_fps or ())
     # Cap size so the job document stays light
     if len(fps) > 4000:
         fps = fps[-4000:]
+    gig_local = max(0, int(checked))
+    display = max(0, int(progress_base)) + gig_local
     update_job(
         job_id,
         {
             "gigReviewCheckpoint": {
                 "gigUrl": (normalize_fiverr_url(gig_url) or gig_url or "").strip(),
-                "checked": max(0, int(checked)),
+                "checked": gig_local,
                 "reviewPage": max(1, int(review_page)),
                 "loadClicks": max(0, int(load_clicks)),
                 "processedFps": fps,
             },
-            "reviewsChecked": max(0, int(checked)),
-            "totalReviewsParsed": max(0, int(checked)),
+            "reviewsChecked": display,
+            "totalReviewsParsed": display,
             "currentReviewPage": max(1, int(review_page)),
         },
     )

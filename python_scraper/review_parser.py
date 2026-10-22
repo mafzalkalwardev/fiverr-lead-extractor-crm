@@ -1671,10 +1671,11 @@ async def extract_reviews(
                 save_gig_review_checkpoint(
                     job_id,
                     gig_url=return_url,
-                    checked=checked,  # gig-local (progress_base added only for UI fields)
+                    checked=checked,
                     review_page=review_page,
                     load_clicks=total_load_clicks,
                     processed_fps=processed_card_fps,
+                    progress_base=progress_base,
                 )
             except Exception:
                 pass
@@ -1722,6 +1723,7 @@ async def extract_reviews(
                     review_page=review_page,
                     load_clicks=total_load_clicks,
                     processed_fps=processed_card_fps,
+                    progress_base=progress_base,
                 )
             except Exception:
                 pass
@@ -1913,6 +1915,7 @@ async def extract_reviews(
                             review_page=review_page,
                             load_clicks=total_load_clicks,
                             processed_fps=processed_card_fps,
+                            progress_base=progress_base,
                         )
                     except Exception:
                         pass

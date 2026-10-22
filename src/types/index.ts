@@ -33,6 +33,13 @@ export interface ScrapeJob {
   listedReviewCount?: number;
   lastScannedReview?: string;
   lastScannedCountry?: string;
+  gigReviewCheckpoint?: {
+    gigUrl?: string;
+    checked?: number;
+    reviewPage?: number;
+    loadClicks?: number;
+    processedFps?: string[];
+  } | null;
   gigsScanned: number;
   reviewsChecked: number;
   usLeadsFound: number;

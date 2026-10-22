@@ -569,6 +569,7 @@ async def process_gig_list(job: dict, job_id: str, state: dict, retry_pass: int 
                                 "verificationMessage": "",
                                 "resumeIndex": i + 1,
                                 "gigQueue": queue,
+                                "gigReviewCheckpoint": None,
                             },
                         )
                         state["resume_index"] = i + 1

@@ -125,6 +125,25 @@ Generated code is a behavior scaffold, not exact recovered source. Install `pefi
 
 ---
 
+---
+
+## Case Study (Problem → Stack → Result)
+
+### Problem
+Agencies researching Fiverr sellers/reviews needed structured lead data, queue workers, and exportable CRM records — not one-off scrapes pasted into spreadsheets.
+
+### Stack
+TypeScript, Playwright workers, MongoDB, BullMQ, admin dashboard, Excel export, Electron packaging
+
+### Result
+Built an end-to-end lead extraction CRM with background workers, history tracking, admin UI, and desktop packaging so research teams can turn review data into outreach-ready lists.
+
+**Audience:** Agencies, lead-gen freelancers, research ops
+
+📄 Full write-up: [`CASE_STUDY.md`](./CASE_STUDY.md)
+
+**Hire / contact:** GitHub [@mafzalkalwardev](https://github.com/mafzalkalwardev) · LinkedIn [@mafzalkalwardev](https://www.linkedin.com/in/mafzalkalwardev) · WhatsApp [+92 307 9670503](https://wa.me/923079670503) · [Portfolio](https://mafzalkalwardev.github.io) · [Email](mailto:kalwarmuhammadafzal3@gmail.com)
+
 ## Discoverability
 
 **Author:** Muhammad Afzal Kalwar ([@mafzalkalwardev](https://github.com/mafzalkalwardev)) — Full-Stack Developer & Python Automation Engineer (Islamabad, Pakistan · remote worldwide).

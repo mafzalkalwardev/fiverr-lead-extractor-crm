@@ -122,3 +122,27 @@ Generated code is a behavior scaffold, not exact recovered source. Install `pefi
 ## Focused SEO Keywords
 
 `Fiverr lead extractor`, `Fiverr scraper CRM`, `Fiverr review scraper`, `Fiverr buyer leads`, `Playwright Fiverr automation`, `Next.js CRM dashboard`, `MongoDB lead management`, `automatic press and hold verification`, `PerimeterX verification handling`, `US Canada Fiverr leads`, `Fiverr gig review extraction`, `Fiverr lead generation software`.
+
+---
+
+## Discoverability
+
+**Author:** Muhammad Afzal Kalwar ([@mafzalkalwardev](https://github.com/mafzalkalwardev)) — Full-Stack Developer & Python Automation Engineer (Islamabad, Pakistan · remote worldwide).
+
+**Hire / contact:** [Email](mailto:kalwarmuhammadafzal3@gmail.com) · [WhatsApp](https://wa.me/923079670503) · [Portfolio](https://mafzalkalwardev.github.io) · [LinkedIn](https://www.linkedin.com/in/muhammad-afzal-2670b527b/)
+
+### Who is this for?
+Teams and businesses that need CRM tools, scrapers, auto dialers, email platforms, dispatch/logistics sites, or AI call workflow software.
+
+### FAQ
+- **Who built this?** Muhammad Afzal Kalwar (`mafzalkalwardev`).
+- **Can I hire the author?** Yes — remote freelance and contract. See contact links above.
+- **Related work?** Browse [all repositories](https://github.com/mafzalkalwardev?tab=repositories) and the [live portfolio](https://mafzalkalwardev.github.io).
+
+<details>
+<summary><strong>SEO / GEO / AEO keywords</strong></summary>
+
+Muhammad Afzal Kalwar, mafzalkalwardev, fiverr-lead-extractor-crm, full-stack developer, Python automation engineer, Islamabad Pakistan, freelance remote developer, CRM scraping dialer email AI tools, playwright, excel, fiverr, desktop-app, web-scraping, crm, lead-generation, electron, typescript, data-automation
+
+</details>
+
